@@ -1,0 +1,37 @@
+// ============================================================
+// pi-container — Template loading
+// ============================================================
+// Reads Dockerfile and entrypoint.sh from the templates/
+// directory and injects dynamic values. The template files
+// are plain Dockerfile/bash with {{piVersion}} placeholders.
+//
+// This keeps the infrastructure code in real files that are
+// easy to read and edit, rather than embedded strings.
+// ============================================================
+
+import * as path from "path";
+import * as fs from "fs";
+import { PiContainerConfig } from "./config";
+
+// Templates are in the templates/ directory, sibling to dist/
+const TEMPLATES_DIR = path.join(__dirname, "..", "templates");
+
+/**
+ * Load and populate the Dockerfile template.
+ * Only {{piVersion}} is injected — everything else is static.
+ */
+export function generateDockerfile(config: PiContainerConfig): string {
+  const templatePath = path.join(TEMPLATES_DIR, "Dockerfile");
+  let content = fs.readFileSync(templatePath, "utf-8");
+  content = content.replace(/\{\{piVersion\}\}/g, config.piVersion);
+  return content;
+}
+
+/**
+ * Load the entrypoint.sh template.
+ * No dynamic injection needed — it's fully static.
+ */
+export function generateEntrypoint(_config: PiContainerConfig): string {
+  const templatePath = path.join(TEMPLATES_DIR, "entrypoint.sh");
+  return fs.readFileSync(templatePath, "utf-8");
+}
