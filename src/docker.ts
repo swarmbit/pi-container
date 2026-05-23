@@ -120,6 +120,11 @@ export function buildDockerRunArgs(config: PiContainerConfig, command: string[])
     args.push("--env-file", config.envFile);
   }
 
+  // Port mappings (localhost only)
+  for (const port of config.ports) {
+    args.push("-p", `127.0.0.1:${port.host}:${port.container}`);
+  }
+
   // Working directory
   args.push("-w", "/workspace");
 

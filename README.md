@@ -27,6 +27,11 @@ pi-container                    # interactive session
 pi-container -- -p "Summarize"  # print mode
 pi-container -- -r               # resume session
 
+# With port forwarding for web dev:
+pi-container -p 3000              # expose port 3000
+pi-container -p 3000 -p 6006    # expose multiple ports
+pi-container -p 8080:3000        # host 8080 → container 3000
+
 # Management:
 pi-container build              # build/rebuild the image
 pi-container shell              # open a shell in the container
@@ -71,6 +76,7 @@ PI_VERSION=0.75.4 pi-container
 - **Baked into the image**: pi binary (pinned version), team extensions, team packages, default settings
 - **Mounted from host** (persists across runs): `~/.pi/agent` (settings, auth, sessions, extensions)
 - **Mounted from CWD** (your project): always mounts `$(pwd)` as `/workspace`
+- **Port forwarding** (optional): `-p` flags expose container ports on `localhost`
 
 Each invocation creates a fresh container. Multiple instances can run simultaneously (no `--name` collision).
 
@@ -107,6 +113,10 @@ my-project/
 ```yaml
 piVersion: "0.75.5"
 imageTag: "pi-agent:0.75.5"    # Override image tag
+ports:                          # Export container ports to localhost
+  - 3000                        # Dev server
+  - 6006                        # Storybook
+  - 8080:80                     # Host 8080 → container 80
 ```
 
 ### Environment variables
@@ -116,6 +126,7 @@ imageTag: "pi-agent:0.75.5"    # Override image tag
 | `PI_VERSION` | `0.75.5` | Pi version to install (overrides user & project config) |
 | `PI_IMAGE_TAG` | `pi-agent:<version>` | Docker image tag (overrides user & project config) |
 | `PI_CONFIG_DIR` | `~/.pi/agent` | Host path for pi config (overrides user & project config) |
+| `PI_PORTS` | *(none)* | Comma-separated ports, e.g. `3000,8080:3000,9000-9010` |
 
 ### User config: `~/.pi/pi-container.yml`
 
@@ -126,16 +137,19 @@ For personal overrides that apply across all projects:
 piVersion: "0.75.4"        # Pin a different version than the team default
 imageTag: "my-registry/pi"  # Use a custom registry image
 configDir: "~/pi-work"      # Use a different pi config directory
+ports:                       # Override ports
+  - 3000
 ```
 
 This file is not committed to git — it's for individual user preferences.
 
 ### Config precedence (highest wins)
 
-1. Environment variables (`PI_VERSION`, `PI_IMAGE_TAG`, `PI_CONFIG_DIR`)
-2. User config (`~/.pi/pi-container.yml`) — personal, not committed
-3. Project config (`.pi-container/config.yml`) — team, committed to git
-4. Built-in defaults
+1. CLI flags (`-p`, `--port`)
+2. Environment variables (`PI_VERSION`, `PI_IMAGE_TAG`, `PI_CONFIG_DIR`, `PI_PORTS`)
+3. User config (`~/.pi/pi-container.yml`) — personal, not committed
+4. Project config (`.pi-container/config.yml`) — team, committed to git
+5. Built-in defaults
 
 ### API keys
 
@@ -166,6 +180,30 @@ If you need to run two agents on the same project simultaneously, that's a workf
 | `~/.pi/pi-container.yml` | *(not mounted)* | User-level pi-container config |
 
 If you use pi both natively and in the container, they share the same config.
+
+### Port forwarding
+
+Expose container ports so you can access web apps from your host machine:
+
+```bash
+# CLI flag
+pi-container -p 3000                # localhost:3000 → container:3000
+pi-container -p 8080:3000           # localhost:8080 → container:3000
+pi-container -p 3000 -p 6006       # multiple ports
+
+# Environment variable
+PI_PORTS=3000,6006 pi-container
+PI_PORTS=3000,8080:3000,9000-9010 pi-container   # ranges supported in env/config
+
+# Config file
+# .pi-container/config.yml
+ports:
+  - 3000
+  - 6006
+  - 8080:80
+```
+
+All ports bind to `127.0.0.1` (localhost only) for security. If a host port is already in use, `pi-container` will report the conflict and exit.
 
 ## Safety
 

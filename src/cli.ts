@@ -16,7 +16,7 @@
 //   4. Built-in defaults
 // ============================================================
 
-import { loadConfig, getUserConfigPath, PiContainerConfig } from "./config";
+import { loadConfig, getUserConfigPath, PiContainerConfig, checkPortAvailable } from "./config";
 import { buildImage, runContainer, shellInContainer, buildDockerRunArgs } from "./docker";
 import * as fs from "fs";
 import * as path from "path";
@@ -25,7 +25,7 @@ import { execSync } from "child_process";
 function printHelp(): void {
   const userConfigPath = getUserConfigPath();
   console.log(`
-Usage: pi-container [command] [-- PI_ARGS...]
+Usage: pi-container [command] [options] [-- PI_ARGS...]
 
 Commands:
   (default)     Run pi in Docker (interactive session)
@@ -34,13 +34,18 @@ Commands:
   dry-run       Print resolved config and docker commands without executing
 
 Options:
-  --help, -h    Show this help
-  --version     Show version
+  --help, -h        Show this help
+  --version         Show version
+  -p, --port PORT   Publish container port to localhost (repeatable)
+                    PORT can be a simple port (3000) or host:container (8080:3000)
 
 All arguments after -- are passed to pi.
 
 Examples:
   pi-container                              # interactive session
+  pi-container -p 3000                      # expose port 3000
+  pi-container -p 8080:3000                # host 8080 → container 3000
+  pi-container -p 3000 -p 6006             # expose multiple ports
   pi-container -- -p "Summarize"            # print mode
   pi-container -- -r                        # resume session
   pi-container build                        # build image
@@ -50,6 +55,7 @@ Environment:
   PI_VERSION     Pi version (default: 0.75.5)
   PI_IMAGE_TAG   Docker image tag (default: pi-agent:<version>)
   PI_CONFIG_DIR  Host path for pi config (default: ~/.pi/agent)
+  PI_PORTS       Comma-separated ports, e.g. "3000,8080:3000,9000-9010"
 
 Config precedence (highest wins):
   1. Environment variables
@@ -59,16 +65,25 @@ Config precedence (highest wins):
 
 Project config:
   Place a .pi-container/ directory in your project root:
-    .pi-container/config.yml          — pi version, image tag overrides
+    .pi-container/config.yml          — pi version, image tag, port overrides
     .pi-container/extensions/         — team extensions (baked into image)
     .pi-container/packages/           — team npm packages
     .pi-container/settings/           — default settings template
+
+  Example .pi-container/config.yml with ports:
+    piVersion: "0.75.5"
+    ports:
+      - 3000        # dev server
+      - 6006        # storybook
+      - 8080:80     # host 8080 → container 80
 
 User config:
   Create ${userConfigPath} for personal overrides:
     piVersion: "0.75.4"         # Override pi version
     imageTag: "my-registry/pi"  # Override image tag
     configDir: "~/pi-work"      # Use a different pi config directory
+    ports:                       # Override ports
+      - 3000
 
   Pi config is mounted from the host at ~/.pi/agent so settings,
   sessions, and auth tokens persist natively on your machine.
@@ -81,7 +96,7 @@ function printVersion(): void {
   console.log(`pi-container ${pkg.version}`);
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
   // Split on -- to separate our args from pi's args
@@ -98,8 +113,10 @@ function main(): void {
 
   // Parse our args
   let command: "run" | "build" | "shell" | "dry-run" = "run";
+  const cliPorts: string[] = [];
 
-  for (const arg of ourArgs) {
+  for (let i = 0; i < ourArgs.length; i++) {
+    const arg = ourArgs[i];
     if (arg === "--help" || arg === "-h") {
       printHelp();
       return;
@@ -108,7 +125,16 @@ function main(): void {
       printVersion();
       return;
     }
-    if (arg === "build") {
+    if (arg === "-p" || arg === "--port") {
+      const value = ourArgs[i + 1];
+      if (!value || value.startsWith("-")) {
+        console.error(`Error: ${arg} requires a port argument.`);
+        console.error("Example: pi-container -p 3000 or pi-container -p 8080:3000");
+        process.exit(1);
+      }
+      cliPorts.push(value);
+      i++; // skip the value
+    } else if (arg === "build") {
       command = "build";
     } else if (arg === "shell") {
       command = "shell";
@@ -133,11 +159,27 @@ function main(): void {
   }
 
   // Load config from .pi-container/, user config, and environment
-  const config = loadConfig();
+  const config = loadConfig({ cliPorts });
 
   // Ensure pi config directory exists on host
   for (const sub of ["sessions", "extensions", "npm", "git", "prompts", "skills"]) {
     fs.mkdirSync(path.join(config.configDir, sub), { recursive: true });
+  }
+
+  // Check port availability before running
+  if ((command === "run" || command === "shell") && config.ports.length > 0) {
+    const conflicts = await checkPorts(config.ports);
+    if (conflicts.length > 0) {
+      console.error("Error: The following ports are already in use on localhost:");
+      for (const { host } of conflicts) {
+        console.error(`  - ${host}`);
+      }
+      console.error("");
+      console.error("To fix, either:");
+      console.error("  - Change the host port in .pi-container/config.yml (e.g., \"3001:3000\")");
+      console.error("  - Stop the process using the port");
+      process.exit(1);
+    }
   }
 
   // Dispatch command
@@ -157,6 +199,17 @@ function main(): void {
   }
 }
 
+async function checkPorts(ports: { host: number; container: number }[]): Promise<{ host: number }[]> {
+  const conflicts: { host: number }[] = [];
+  for (const port of ports) {
+    const available = await checkPortAvailable(port.host);
+    if (!available) {
+      conflicts.push({ host: port.host });
+    }
+  }
+  return conflicts;
+}
+
 function printDryRun(config: PiContainerConfig, piArgs: string[]): void {
   const userConfigPath = getUserConfigPath();
   const userConfigExists = fs.existsSync(userConfigPath);
@@ -171,6 +224,15 @@ function printDryRun(config: PiContainerConfig, piArgs: string[]): void {
   console.log(`  extensions:     ${config.extensions.length > 0 ? config.extensions.join(", ") : "(none)"}`);
   console.log(`  hasPackages:    ${config.hasPackages}`);
   console.log(`  hasSettings:    ${config.hasSettings}`);
+  if (config.ports.length > 0) {
+    console.log("  ports:");
+    for (const p of config.ports) {
+      const arrow = p.host === p.container ? String(p.host) : `${p.host}:${p.container}`;
+      console.log(`    ${arrow} → ${p.container} (localhost)`);
+    }
+  } else {
+    console.log(`  ports:          (none)`);
+  }
   console.log();
   console.log("Config sources:");
   console.log(`  User config:    ${userConfigPath} ${userConfigExists ? "(found)" : "(not found)"}`);

@@ -17,6 +17,7 @@ function makeConfig(overrides: Partial<PiContainerConfig> = {}): PiContainerConf
     extensions: [],
     hasPackages: false,
     hasSettings: false,
+    ports: [],
     ...overrides,
   };
 }

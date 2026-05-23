@@ -21,6 +21,7 @@ function makeConfig(overrides: Partial<PiContainerConfig> = {}): PiContainerConf
     extensions: [],
     hasPackages: false,
     hasSettings: false,
+    ports: [],
     ...overrides,
   };
 }
@@ -120,6 +121,60 @@ describe("buildDockerRunArgs", () => {
     // Should have either -it or -i
     const hasItFlag = args.includes("-it") || args.includes("-i");
     expect(hasItFlag).toBe(true);
+  });
+
+  it("adds port mappings with localhost binding", () => {
+    const config = makeConfig({ ports: [{ host: 3000, container: 3000 }] });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const pIdx = args.indexOf("-p");
+    expect(pIdx).toBeGreaterThan(-1);
+    expect(args[pIdx + 1]).toBe("127.0.0.1:3000:3000");
+  });
+
+  it("adds host:container port mappings", () => {
+    const config = makeConfig({ ports: [{ host: 8080, container: 3000 }] });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const pIdx = args.indexOf("-p");
+    expect(pIdx).toBeGreaterThan(-1);
+    expect(args[pIdx + 1]).toBe("127.0.0.1:8080:3000");
+  });
+
+  it("adds multiple port mappings", () => {
+    const config = makeConfig({
+      ports: [
+        { host: 3000, container: 3000 },
+        { host: 8080, container: 80 },
+        { host: 6006, container: 6006 },
+      ],
+    });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const pIndices = args.reduce<number[]>((acc, arg, i) => {
+      if (arg === "-p") acc.push(i);
+      return acc;
+    }, []);
+    expect(pIndices).toHaveLength(3);
+    expect(args[pIndices[0] + 1]).toBe("127.0.0.1:3000:3000");
+    expect(args[pIndices[1] + 1]).toBe("127.0.0.1:8080:80");
+    expect(args[pIndices[2] + 1]).toBe("127.0.0.1:6006:6006");
+  });
+
+  it("does not add -p flags when no ports configured", () => {
+    const config = makeConfig();
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    expect(args).not.toContain("-p");
+  });
+
+  it("ports come before the image name", () => {
+    const config = makeConfig({ ports: [{ host: 3000, container: 3000 }] });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const pIdx = args.indexOf("-p");
+    const imageIdx = args.indexOf(config.imageTag);
+    expect(pIdx).toBeLessThan(imageIdx);
   });
 });
 
