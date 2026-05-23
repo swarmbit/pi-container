@@ -4,13 +4,9 @@ Run [Pi Coding Agent](https://github.com/earendil-works/pi-coding-agent) in Dock
 
 ## Why
 
-Running pi in Docker ensures every team member uses the same environment — same pi version, same extensions, same safety gates. But the previous approach (shell script + docker compose) had problems:
+Running pi in Docker ensures every team member uses the same environment — same pi version, same extensions, same safety gates.
 
-- **CWD bug**: docker compose resolves mounts relative to the compose file, not the caller's directory
-- **Per-project boilerplate**: every project needed `docker-compose.yml`, `pi-container.sh`, and `.pi-container/`
-- **Not distributable**: teams had to copy-paste the shell script across projects
-
-`pi-container` fixes all of these:
+`pi-container` makes this simple:
 
 - **CWD-respect mounts**: uses `docker run` directly, so `$(pwd)/` is always `/workspace`
 - **One install**: `npm install -g pi-container` works from any directory
@@ -177,17 +173,6 @@ The baked-in extensions provide baseline protection:
 
 - **confirm-dangerous** — Prompts before destructive commands (`rm -rf`, `sudo`, force push, etc.), writes to system paths, and modifications to the pi config directory
 - **workspace-guard** — Adds a system prompt keeping the model inside `/workspace`
-
-## Migrating from the shell script
-
-If you previously used `pi-container.sh` and `docker-compose.yml`:
-
-1. Install `pi-container` globally: `npm install -g pi-container`
-2. Keep your `.pi-container/` directory (extensions, packages, settings) — it works as-is
-3. Delete `pi-container.sh` and `docker-compose.yml`
-4. Run `pi-container` instead of `./pi-container.sh`
-
-The `.pi-container/` directory structure is unchanged. The npm package replaces the shell script and compose file.
 
 ## Development
 
