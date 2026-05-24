@@ -3,5 +3,7 @@
   "version": "1.0.0",
   "private": true,
   "description": "Prompts before destructive commands, system path writes, and pi config modifications",
-  "dependencies": {}
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
 }

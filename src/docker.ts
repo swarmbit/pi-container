@@ -223,6 +223,8 @@ function createBuildContext(config: PiContainerConfig): string {
 function copyDir(src: string, dst: string): void {
   fs.mkdirSync(dst, { recursive: true });
   for (const entry of fs.readdirSync(src, { withFileTypes: true })) {
+    // Skip node_modules — the Docker build runs npm install for the package
+    if (entry.name === "node_modules") continue;
     const srcPath = path.join(src, entry.name);
     const dstPath = path.join(dst, entry.name);
     if (entry.isDirectory()) {
