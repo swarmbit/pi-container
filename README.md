@@ -60,13 +60,14 @@ PI_VERSION=0.75.4 pi-container
 │         │ (registers extensions, themes in settings)      │
 │         ▼                                                  │
 │  ┌─────────────────────────────────────────┐             │
-│  │  /home/pi-user/.pi/agent/    ◄── Host mount           │
-│  │    ├── settings.json          (shared w/ native pi)    │
-│  │    ├── auth.json              (shared w/ native pi)    │
-│  │    ├── sessions/              (shared w/ native pi)    │
-│  │    ├── extensions/                                     │
-│  │    ├── npm/                                            │
-│  │    └── skills/                                          │
+│  │  /home/pi-user/.pi/                ◄── Host mount           │
+│  │    └── agent/                         │             │
+│  │        ├── settings.json   (shared w/ native pi)    │
+│  │        ├── auth.json       (shared w/ native pi)    │
+│  │        ├── sessions/        (shared w/ native pi)    │
+│  │        ├── extensions/                             │
+│  │        ├── npm/                                    │
+│  │        └── skills/                                  │
 │  └─────────────────────────────────────────┘             │
 │                                                          │
 │  ┌─────────────────────────────────────────┐             │
@@ -79,7 +80,7 @@ PI_VERSION=0.75.4 pi-container
 - **Baked into the image**: pi binary (pinned version), team pi package (extensions, themes), default settings
 - **Installed on startup**: `pi install /opt/pi-package` registers the team package — extensions, themes, and skills are discovered by pi automatically
 - **Additional packages**: third-party packages (from npm, git, or local paths) are installed on startup via `pi install`
-- **Mounted from host** (persists across runs): `~/.pi/agent` (settings, auth, sessions, extensions)
+- **Mounted from host** (persists across runs): `~/.pi` (settings, auth, sessions, extensions)
 - **Mounted from CWD** (your project): always mounts `$(pwd)` as `/workspace`
 - **Port forwarding** (optional): `-p` flags expose container ports on `localhost`
 
@@ -93,7 +94,7 @@ Run `pi-container` from any directory. It uses defaults:
 
 - pi version: `0.75.5`
 - image tag: `pi-agent:<version>`
-- config dir: `~/.pi/agent`
+- config dir: `~/.pi`
 
 ### Project config: `.pi-container/`
 
@@ -151,7 +152,7 @@ packages:                       # Pre-install third-party pi packages
   - git:github.com/team/repo@v2
 ```
 
-Packages listed in `config.yml` are passed to `pi install` on container startup. They're installed on first run and cached in `~/.pi/agent` for subsequent runs.
+Packages listed in `config.yml` are passed to `pi install` on container startup. They're installed on first run and cached in `~/.pi` for subsequent runs.
 
 ### Environment variables
 
@@ -159,7 +160,7 @@ Packages listed in `config.yml` are passed to `pi install` on container startup.
 |----------|---------|-------------|
 | `PI_VERSION` | `0.75.5` | Pi version to install (overrides user & project config) |
 | `PI_IMAGE_TAG` | `pi-agent:<version>` | Docker image tag (overrides user & project config) |
-| `PI_CONFIG_DIR` | `~/.pi/agent` | Host path for pi config (overrides user & project config) |
+| `PI_CONFIG_DIR` | `~/.pi` | Host path for pi config (overrides user & project config) |
 | `PI_PORTS` | *(none)* | Comma-separated ports, e.g. `3000,8080:3000,9000-9010` |
 
 ### User config: `~/.pi/pi-container.yml`
@@ -198,7 +199,7 @@ The `.env` file is automatically loaded and passed to the container.
 
 ## Multiple instances
 
-Each `pi-container` invocation creates a new ephemeral container (`docker run --rm`). Containers don't interfere with each other. The pi config directory (`~/.pi/agent`) is shared on the host, so settings and auth persist across runs.
+Each `pi-container` invocation creates a new ephemeral container (`docker run --rm`). Containers don't interfere with each other. The pi config directory (`~/.pi`) is shared on the host, so settings and auth persist across runs.
 
 If you need to run two agents on the same project simultaneously, that's a workflow concern (like two editors on the same files), not a container concern.
 
@@ -207,6 +208,7 @@ If you need to run two agents on the same project simultaneously, that's a workf
 | Host path | Container path | Contents |
 |-----------|---------------|----------|
 | `$(pwd)` | `/workspace` | Your project (CWD mount) |
+| `~/.pi` | `/home/pi-user/.pi` | Full pi config (mounted) |
 | `~/.pi/agent/settings.json` | `/home/pi-user/.pi/agent/settings.json` | Model, thinking level, preferences |
 | `~/.pi/agent/auth.json` | `/home/pi-user/.pi/agent/auth.json` | OAuth tokens |
 | `~/.pi/agent/sessions/` | `/home/pi-user/.pi/agent/sessions/` | Conversation history |

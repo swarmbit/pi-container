@@ -32,7 +32,7 @@ export interface PortMapping {
 export interface PiContainerConfig {
   piVersion: string;
   imageTag: string;
-  configDir: string; // absolute host path (~/.pi/agent)
+  configDir: string; // absolute host path (~/.pi)
   containerDir: string; // absolute path to .pi-container dir, "" if none
   projectDir: string; // absolute path — CWD, the workspace mount source
   envFile: string; // absolute path to .env, "" if none
@@ -99,7 +99,7 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig {
     process.env.PI_CONFIG_DIR ||
     userConfig.configDir ||
     projectConfig.configDir ||
-    path.join(homeDir, ".pi", "agent");
+    path.join(homeDir, ".pi");
 
   // Resolve .env file
   const envFile = findEnvFile(projectDir);

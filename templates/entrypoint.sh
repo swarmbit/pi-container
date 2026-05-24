@@ -7,7 +7,8 @@
 # ============================================================
 set -eo pipefail
 
-PI_HOME="/home/pi-user/.pi/agent"
+PI_HOME="/home/pi-user/.pi"
+PI_AGENT_HOME="${PI_HOME}/agent"
 HOST_UID="${HOST_UID:-1000}"
 HOST_GID="${HOST_GID:-1000}"
 
@@ -18,18 +19,18 @@ if [ "$(id -u pi-user)" != "${HOST_UID}" ]; then
 fi
 
 # ── Ensure directory structure exists ──────────────────
-mkdir -p "${PI_HOME}/sessions"
-mkdir -p "${PI_HOME}/extensions"
-mkdir -p "${PI_HOME}/npm"
-mkdir -p "${PI_HOME}/git"
-mkdir -p "${PI_HOME}/prompts"
-mkdir -p "${PI_HOME}/skills"
+mkdir -p "${PI_AGENT_HOME}/sessions"
+mkdir -p "${PI_AGENT_HOME}/extensions"
+mkdir -p "${PI_AGENT_HOME}/npm"
+mkdir -p "${PI_AGENT_HOME}/git"
+mkdir -p "${PI_AGENT_HOME}/prompts"
+mkdir -p "${PI_AGENT_HOME}/skills"
 
 # ── Fix ownership of config directory ──────────────────
 chown -R pi-user:pi-user "${PI_HOME}" 2>/dev/null || true
 
 # ── Copy default settings if none exist ────────────────
-PI_SETTINGS="${PI_HOME}/settings.json"
+PI_SETTINGS="${PI_AGENT_HOME}/settings.json"
 DEFAULT_SETTINGS="/opt/pi/default-settings.json"
 if [ ! -f "${PI_SETTINGS}" ]; then
   cp "${DEFAULT_SETTINGS}" "${PI_SETTINGS}"

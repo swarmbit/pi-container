@@ -10,7 +10,7 @@ function makeConfig(overrides: Partial<PiContainerConfig> = {}): PiContainerConf
   return {
     piVersion: "0.75.5",
     imageTag: "pi-agent:0.75.5",
-    configDir: "/home/user/.pi/agent",
+    configDir: "/home/user/.pi",
     containerDir: "/project/.pi-container",
     projectDir: "/project",
     envFile: "",
@@ -165,10 +165,11 @@ describe("generateEntrypoint", () => {
     const config = makeConfig();
     const sh = generateEntrypoint(config);
 
-    expect(sh).toContain('"${PI_HOME}/sessions"');
-    expect(sh).toContain('"${PI_HOME}/extensions"');
-    expect(sh).toContain('"${PI_HOME}/npm"');
-    expect(sh).toContain('"${PI_HOME}/git"');
+    expect(sh).toContain('PI_AGENT_HOME="${PI_HOME}/agent"');
+    expect(sh).toContain('"${PI_AGENT_HOME}/sessions"');
+    expect(sh).toContain('"${PI_AGENT_HOME}/extensions"');
+    expect(sh).toContain('"${PI_AGENT_HOME}/npm"');
+    expect(sh).toContain('"${PI_AGENT_HOME}/git"');
   });
 
   it("fixes ownership of config directory", () => {
@@ -182,7 +183,7 @@ describe("generateEntrypoint", () => {
     const config = makeConfig();
     const sh = generateEntrypoint(config);
 
-    expect(sh).toContain('"${PI_HOME}/settings.json"');
+    expect(sh).toContain('"${PI_AGENT_HOME}/settings.json"');
     expect(sh).toContain("/opt/pi/default-settings.json");
     expect(sh).toContain('if [ ! -f "${PI_SETTINGS}" ]; then');
   });

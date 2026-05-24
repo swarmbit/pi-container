@@ -197,7 +197,7 @@ describe("loadConfig", () => {
 
       expect(config.piVersion).toBe("0.75.5");
       expect(config.imageTag).toBe("pi-agent:0.75.5");
-      expect(config.configDir).toBe(path.join(tmpDir, ".pi", "agent"));
+      expect(config.configDir).toBe(path.join(tmpDir, ".pi"));
     });
 
     it("user config can override configDir", () => {

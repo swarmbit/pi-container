@@ -14,7 +14,7 @@ function makeConfig(overrides: Partial<PiContainerConfig> = {}): PiContainerConf
   return {
     piVersion: "0.75.5",
     imageTag: "pi-agent:0.75.5",
-    configDir: "/home/user/.pi/agent",
+    configDir: "/home/user/.pi",
     containerDir: "",
     projectDir: "/project",
     envFile: "",
@@ -45,13 +45,13 @@ describe("buildDockerRunArgs", () => {
   });
 
   it("mounts configDir as pi config", () => {
-    const config = makeConfig({ configDir: "/home/user/.pi/agent" });
+    const config = makeConfig({ configDir: "/home/user/.pi" });
     const args = buildDockerRunArgs(config, ["pi"]);
 
     const vIdx = args.indexOf("-v");
     // Second -v flag (first is projectDir)
     const volArgs = args.filter((_, i) => args[i - 1] === "-v");
-    expect(volArgs).toContain("/home/user/.pi/agent:/home/pi-user/.pi/agent");
+    expect(volArgs).toContain("/home/user/.pi:/home/pi-user/.pi");
   });
 
   it("sets working directory to /workspace", () => {

@@ -13,6 +13,24 @@ import { execSync } from "child_process";
 
 const CLI_PATH = path.resolve(__dirname, "../dist/cli.js");
 
+// Helper to run CLI with a temp config dir (avoids writing to real ~/.pi)
+function runCli(args: string, options: { cwd: string; env?: Record<string, string> }): string {
+  const tmpConfigDir = path.join(options.cwd, ".pi-config");
+  fs.mkdirSync(tmpConfigDir, { recursive: true });
+  const env: Record<string, string | undefined> = {
+    ...process.env as Record<string, string | undefined>,
+    ...options.env,
+    PI_CONFIG_DIR: tmpConfigDir,
+  };
+  // Remove HOME to prevent writing to real ~/.pi
+  delete env.HOME;
+  return execSync(`node ${CLI_PATH} ${args}`, {
+    encoding: "utf-8",
+    cwd: options.cwd,
+    env,
+  });
+}
+
 describe("CLI", () => {
   it("prints help with --help", () => {
     const output = execSync(`node ${CLI_PATH} --help`, { encoding: "utf-8" });
@@ -44,13 +62,8 @@ describe("CLI", () => {
   });
 
   it("separates pi args after --", () => {
-    // dry-run doesn't need docker
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-cli-test-"));
-    const output = execSync(
-      `node ${CLI_PATH} dry-run -- -p "test"`,
-      { encoding: "utf-8", cwd: tmpDir }
-    );
-    // The pi args should include -p and "test" but dry-run should show them
+    const output = runCli("dry-run -- -p \"test\"", { cwd: tmpDir });
     expect(output).toContain("-p");
     expect(output).toContain("test");
     fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -69,10 +82,7 @@ describe("CLI dry-run", () => {
   });
 
   it("shows configuration with no .pi-container", () => {
-    const output = execSync(`node ${CLI_PATH} dry-run`, {
-      encoding: "utf-8",
-      cwd: tmpDir,
-    });
+    const output = runCli("dry-run", { cwd: tmpDir });
 
     expect(output).toContain("piVersion:");
     expect(output).toContain("0.75.5");
@@ -85,40 +95,28 @@ describe("CLI dry-run", () => {
 
   it("detects .pi-container directory", () => {
     fs.mkdirSync(path.join(tmpDir, ".pi-container"));
-    const output = execSync(`node ${CLI_PATH} dry-run`, {
-      encoding: "utf-8",
-      cwd: tmpDir,
-    });
+    const output = runCli("dry-run", { cwd: tmpDir });
 
     expect(output).toContain(tmpDir + "/.pi-container");
   });
 
   it("shows docker run command with correct volume mounts", () => {
-    const output = execSync(`node ${CLI_PATH} dry-run`, {
-      encoding: "utf-8",
-      cwd: tmpDir,
-    });
+    const output = runCli("dry-run", { cwd: tmpDir });
 
     // Should mount CWD as /workspace
     expect(output).toContain(`${tmpDir}:/workspace:cached`);
-    // Should mount config dir
-    expect(output).toContain("/home/pi-user/.pi/agent");
+    // Should mount config dir under .pi-config (our test override)
+    expect(output).toContain("/.pi-config:/home/pi-user/.pi");
   });
 
   it("respects PI_VERSION env var", () => {
-    const output = execSync(`PI_VERSION=1.0.0 node ${CLI_PATH} dry-run`, {
-      encoding: "utf-8",
-      cwd: tmpDir,
-    });
+    const output = runCli("dry-run", { cwd: tmpDir, env: { PI_VERSION: "1.0.0" } });
 
     expect(output).toContain("1.0.0");
   });
 
   it("shows config sources in dry-run output", () => {
-    const output = execSync(`node ${CLI_PATH} dry-run`, {
-      encoding: "utf-8",
-      cwd: tmpDir,
-    });
+    const output = runCli("dry-run", { cwd: tmpDir });
 
     expect(output).toContain("Config sources:");
     expect(output).toContain("User config:");
@@ -128,10 +126,7 @@ describe("CLI dry-run", () => {
 
   it("detects .env file", () => {
     fs.writeFileSync(path.join(tmpDir, ".env"), "ANTHROPIC_API_KEY=sk-test");
-    const output = execSync(`node ${CLI_PATH} dry-run`, {
-      encoding: "utf-8",
-      cwd: tmpDir,
-    });
+    const output = runCli("dry-run", { cwd: tmpDir });
 
     expect(output).toContain("--env-file");
     expect(output).toContain(".env");
@@ -145,10 +140,7 @@ describe("CLI dry-run", () => {
       JSON.stringify({ name: "test-pkg", pi: { extensions: ["./extensions"] } })
     );
 
-    const output = execSync(`node ${CLI_PATH} dry-run`, {
-      encoding: "utf-8",
-      cwd: tmpDir,
-    });
+    const output = runCli("dry-run", { cwd: tmpDir });
 
     expect(output).toContain("hasPackage");
   });
@@ -161,10 +153,7 @@ describe("CLI dry-run", () => {
       JSON.stringify({ theme: "github" })
     );
 
-    const output = execSync(`node ${CLI_PATH} dry-run`, {
-      encoding: "utf-8",
-      cwd: tmpDir,
-    });
+    const output = runCli("dry-run", { cwd: tmpDir });
 
     expect(output).toContain("hasSettings");
   });
@@ -177,10 +166,7 @@ describe("CLI dry-run", () => {
       "packages:\n  - npm:@some-team/ext@1.0.0"
     );
 
-    const output = execSync(`node ${CLI_PATH} dry-run`, {
-      encoding: "utf-8",
-      cwd: tmpDir,
-    });
+    const output = runCli("dry-run", { cwd: tmpDir });
 
     expect(output).toContain("npm:@some-team/ext@1.0.0");
   });

@@ -5,8 +5,11 @@
 // writes outside /workspace, and modifications to the pi
 // config directory.
 //
-// This extension is baked into the pi-container image and
-// symlinked into ~/.pi/agent/extensions/ on startup.
+// Read operations (read tool) are always allowed — they are
+// never dangerous regardless of the target path.
+//
+// This extension is baked into the pi-container image as part
+// of the /opt/pi-package pi package.
 // ============================================================
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -30,22 +33,14 @@ const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; description: string }> = [
   { pattern: /\bwget\s+.*\|\s*(sudo\s+)?sh\b/, description: "Pipe wget to shell" },
 ];
 
-// Paths that should not be written to outside /workspace
-const PROTECTED_PATHS = [
-  "/etc",
-  "/usr",
-  "/bin",
-  "/sbin",
-  "/lib",
-  "/var",
-  "/root",
-  "/boot",
-  "/proc",
-  "/sys",
-];
-
 export default function (pi: ExtensionAPI) {
   pi.on("tool_call", async (event, ctx) => {
+    // ── Read operations are always safe ──────────────────────
+    // Reads cannot modify state and are never dangerous.
+    if (isToolCallEventType("read", event)) {
+      return; // always allow
+    }
+
     // ── Bash commands ──────────────────────────────────────
     if (isToolCallEventType("bash", event)) {
       const command: string = event.input.command ?? "";
@@ -93,13 +88,17 @@ export default function (pi: ExtensionAPI) {
   });
 }
 
-function isOutsideWorkspace(filePath: string): boolean {
+// ── Helper functions (exported for testing) ──────────────────
+
+export function isOutsideWorkspace(filePath: string): boolean {
   // Resolve relative paths
   const normalized = filePath.startsWith("/") ? filePath : `/workspace/${filePath}`;
   return !normalized.startsWith("/workspace/") && normalized !== "/workspace";
 }
 
-function isPiConfigDir(filePath: string): boolean {
+export function isPiConfigDir(filePath: string): boolean {
   // Allow writes to the pi config directory (mounted from host)
-  return filePath.startsWith("/home/pi-user/.pi/agent/");
+  return filePath.startsWith("/home/pi-user/.pi/");
 }
+
+export { DANGEROUS_PATTERNS };

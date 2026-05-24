@@ -113,7 +113,9 @@ export function buildDockerRunArgs(config: PiContainerConfig, command: string[])
   args.push("-v", `${config.projectDir}:/workspace:cached`);
 
   // Mount pi config directory (host → container)
-  args.push("-v", `${config.configDir}:/home/pi-user/.pi/agent`);
+  // Mount the entire ~/.pi directory so the container has access
+  // to the full pi config tree (agent/, themes/, etc.)
+  args.push("-v", `${config.configDir}:/home/pi-user/.pi`);
 
   // Environment file (if .env exists)
   if (config.envFile) {

@@ -54,7 +54,7 @@ Examples:
 Environment:
   PI_VERSION     Pi version (default: 0.75.5)
   PI_IMAGE_TAG   Docker image tag (default: pi-agent:<version>)
-  PI_CONFIG_DIR  Host path for pi config (default: ~/.pi/agent)
+  PI_CONFIG_DIR  Host path for pi config (default: ~/.pi)
   PI_PORTS       Comma-separated ports, e.g. "3000,8080:3000,9000-9010"
 
 Config precedence (highest wins):
@@ -88,7 +88,7 @@ User config:
     ports:                       # Override ports
       - 3000
 
-  Pi config is mounted from the host at ~/.pi/agent so settings,
+  Pi config is mounted from the host at ~/.pi so settings,
   sessions, and auth tokens persist natively on your machine.
 `.trim());
 }
