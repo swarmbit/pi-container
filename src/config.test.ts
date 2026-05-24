@@ -93,6 +93,34 @@ describe("loadConfig", () => {
     expect(config.hasSettings).toBe(true);
   });
 
+  it("detects package directory at project root", () => {
+    // package/ at project root (not inside .pi/)
+    const pkgDir = path.join(tmpDir, "package");
+    fs.mkdirSync(pkgDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(pkgDir, "package.json"),
+      JSON.stringify({ name: "root-pkg", pi: { extensions: ["./extensions"] } })
+    );
+    process.chdir(tmpDir);
+
+    const config = loadConfig({ homeDir: tmpDir });
+    expect(config.hasPackage).toBe(true);
+  });
+
+  it("detects settings at project root", () => {
+    // settings/ at project root (not inside .pi/)
+    const settingsDir = path.join(tmpDir, "settings");
+    fs.mkdirSync(settingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(settingsDir, "default-settings.json"),
+      JSON.stringify({ defaultThinkingLevel: "high" })
+    );
+    process.chdir(tmpDir);
+
+    const config = loadConfig({ homeDir: tmpDir });
+    expect(config.hasSettings).toBe(true);
+  });
+
   it("detects .env file", () => {
     fs.writeFileSync(path.join(tmpDir, ".env"), "ANTHROPIC_API_KEY=sk-test");
     process.chdir(tmpDir);

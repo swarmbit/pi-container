@@ -176,8 +176,9 @@ function createBuildContext(config: PiContainerConfig): string {
   fs.writeFileSync(path.join(tmpDir, "entrypoint.sh"), entrypoint);
 
   // Copy team package (or create minimal placeholder)
-  if (config.containerDir && config.hasPackage) {
-    const pkgSrc = path.join(config.containerDir, "package");
+  // Check project root first, then .pi/
+  if (config.hasPackage) {
+    const pkgSrc = resolveSourceDir(config.projectDir, config.containerDir, "package");
     copyDir(pkgSrc, path.join(tmpDir, "package"));
   } else {
     // Minimal placeholder package so pi install /opt/pi-package succeeds
@@ -209,8 +210,9 @@ function createBuildContext(config: PiContainerConfig): string {
   }
 
   // Copy settings (or create minimal default)
-  if (config.containerDir && config.hasSettings) {
-    const settingsSrc = path.join(config.containerDir, "settings");
+  // Check project root first, then .pi/
+  if (config.hasSettings) {
+    const settingsSrc = resolveSourceDir(config.projectDir, config.containerDir, "settings");
     copyDir(settingsSrc, path.join(tmpDir, "settings"));
   } else {
     fs.mkdirSync(path.join(tmpDir, "settings"), { recursive: true });
@@ -221,6 +223,13 @@ function createBuildContext(config: PiContainerConfig): string {
   }
 
   return tmpDir;
+}
+
+/** Find a source directory — checks project root first, then .pi/. */
+function resolveSourceDir(projectDir: string, containerDir: string, name: string): string {
+  const rootPath = path.join(projectDir, name);
+  if (fs.existsSync(rootPath)) return rootPath;
+  return path.join(containerDir, name);
 }
 
 function copyDir(src: string, dst: string): void {

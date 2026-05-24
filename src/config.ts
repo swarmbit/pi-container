@@ -105,15 +105,15 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig {
   // Resolve .env file
   const envFile = findEnvFile(projectDir);
 
-  // Discover package directory
-  const hasPackage = containerDir
-    ? fs.existsSync(path.join(containerDir, "package", "package.json"))
-    : false;
+  // Discover package directory (check project root first, then .pi/)
+  const hasPackage =
+    fs.existsSync(path.join(projectDir, "package", "package.json")) ||
+    (containerDir ? fs.existsSync(path.join(containerDir, "package", "package.json")) : false);
 
-  // Discover settings
-  const hasSettings = containerDir
-    ? fs.existsSync(path.join(containerDir, "settings", "default-settings.json"))
-    : false;
+  // Discover settings (check project root first, then .pi/)
+  const hasSettings =
+    fs.existsSync(path.join(projectDir, "settings", "default-settings.json")) ||
+    (containerDir ? fs.existsSync(path.join(containerDir, "settings", "default-settings.json")) : false);
 
   // Resolve packages from project config (third-party packages to pre-install)
   const packages = projectConfig.packages ?? [];
