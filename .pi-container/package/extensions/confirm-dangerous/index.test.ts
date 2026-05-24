@@ -19,7 +19,15 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   default: {},
 }));
 
-import { isOutsideWorkspace, isPiConfigDir, DANGEROUS_PATTERNS, WORKSPACE_DIR } from "./index";
+import {
+  isOutsideWorkspace,
+  isPiConfigDir,
+  isTmpPath,
+  isAllowedPath,
+  isTmpRmCommand,
+  DANGEROUS_PATTERNS,
+  WORKSPACE_DIR,
+} from "./index";
 
 // ── isOutsideWorkspace ──────────────────────────────────────
 
@@ -85,11 +93,109 @@ describe("isPiConfigDir", () => {
   });
 });
 
+// ── isTmpPath ────────────────────────────────────────────────
+
+describe("isTmpPath", () => {
+  it("allows /tmp itself", () => {
+    expect(isTmpPath("/tmp")).toBe(true);
+  });
+
+  it("allows paths under /tmp", () => {
+    expect(isTmpPath("/tmp/somefile")).toBe(true);
+    expect(isTmpPath("/tmp/dir/file.txt")).toBe(true);
+    expect(isTmpPath("/tmp/build-output.log")).toBe(true);
+  });
+
+  it("resolves relative paths — does not match non-absolute paths", () => {
+    // Relative paths like tmp/file should NOT be treated as /tmp paths
+    expect(isTmpPath("tmp/file")).toBe(false);
+    expect(isTmpPath("/tmp/file")).toBe(true); // absolute works
+  });
+
+  it("blocks paths outside /tmp", () => {
+    expect(isTmpPath("/etc/passwd")).toBe(false);
+    expect(isTmpPath("/var/log")).toBe(false);
+    expect(isTmpPath("/workspace/file")).toBe(false);
+    expect(isTmpPath("/home/pi-user/.pi/agent")).toBe(false);
+  });
+
+  it("does not match /tmp-like paths", () => {
+    expect(isTmpPath("/tmp2/something")).toBe(false);
+    expect(isTmpPath("/tmprotary")).toBe(false);
+  });
+});
+
+// ── isAllowedPath ────────────────────────────────────────────
+
+describe("isAllowedPath", () => {
+  it("allows pi config dir paths", () => {
+    expect(isAllowedPath("/home/pi-user/.pi/agent/settings.json")).toBe(true);
+    expect(isAllowedPath("/home/pi-user/.pi/agent/extensions/my-ext")).toBe(true);
+  });
+
+  it("allows /tmp paths", () => {
+    expect(isAllowedPath("/tmp/build.log")).toBe(true);
+    expect(isAllowedPath("/tmp")).toBe(true);
+  });
+
+  it("blocks other paths outside workspace", () => {
+    expect(isAllowedPath("/etc/passwd")).toBe(false);
+    expect(isAllowedPath("/var/log/syslog")).toBe(false);
+    expect(isAllowedPath("/usr/bin/node")).toBe(false);
+  });
+});
+
+// ── isTmpRmCommand ─────────────────────────────────────────
+
+describe("isTmpRmCommand", () => {
+  it("allows rm of /tmp files", () => {
+    expect(isTmpRmCommand("rm /tmp/somefile")).toBe(true);
+  });
+
+  it("allows rm -rf of /tmp directories", () => {
+    expect(isTmpRmCommand("rm -rf /tmp/build")).toBe(true);
+    expect(isTmpRmCommand("rm -fr /tmp/cache")).toBe(true);
+  });
+
+  it("allows rm --force of /tmp files", () => {
+    expect(isTmpRmCommand("rm --force /tmp/somefile")).toBe(true);
+  });
+
+  it("allows rm -r of /tmp directories", () => {
+    expect(isTmpRmCommand("rm -r /tmp/test-dir")).toBe(true);
+  });
+
+  it("allows rm of multiple /tmp paths", () => {
+    expect(isTmpRmCommand("rm /tmp/a /tmp/b /tmp/c")).toBe(true);
+  });
+
+  it("rejects rm of paths outside /tmp", () => {
+    expect(isTmpRmCommand("rm -rf /workspace/node_modules")).toBe(false);
+    expect(isTmpRmCommand("rm /etc/hostname")).toBe(false);
+    expect(isTmpRmCommand("rm -rf /var/log/app")).toBe(false);
+  });
+
+  it("rejects rm mixing /tmp and non-/tmp paths", () => {
+    expect(isTmpRmCommand("rm -rf /tmp/build /workspace/dist")).toBe(false);
+  });
+
+  it("rejects non-rm dangerous commands", () => {
+    // sudo rm targets /tmp but sudo is always dangerous
+    expect(isTmpRmCommand("sudo rm -rf /tmp/build")).toBe(false);
+    // dd is not an rm command
+    expect(isTmpRmCommand("dd if=/dev/zero of=/tmp/disk")).toBe(false);
+  });
+
+  it("rejects rm with relative paths (can't determine if /tmp)", () => {
+    expect(isTmpRmCommand("rm -rf build")).toBe(false);
+    expect(isTmpRmCommand("rm -rf ./cache")).toBe(false);
+  });
+});
+
 // ── WORKSPACE_DIR constant ──────────────────────────────────
 
 describe("WORKSPACE_DIR", () => {
   it("defaults to /workspace when WORKSPACE_DIR env is not set", () => {
-    // In test environment, WORKSPACE_DIR is not set, so it defaults
     expect(WORKSPACE_DIR).toBe("/workspace");
   });
 });
@@ -123,6 +229,9 @@ describe("read safety", () => {
       "git status",
       "git log --oneline",
       "git diff HEAD",
+      // Reading from /tmp is also safe
+      "cat /tmp/build.log",
+      "ls /tmp",
     ];
 
     for (const cmd of safeCommands) {
@@ -138,6 +247,7 @@ describe("read safety", () => {
 describe("DANGEROUS_PATTERNS", () => {
   it("matches rm -rf", () => {
     expect(somePatternMatches("rm -rf /tmp/thing")).toBe(true);
+    expect(somePatternMatches("rm -rf /workspace/node_modules")).toBe(true);
   });
 
   it("matches rm --force", () => {
@@ -231,6 +341,9 @@ describe("DANGEROUS_PATTERNS", () => {
       "mkdir -p src/modules",
       "cp file.txt backup.txt",
       "mv old.txt new.txt",
+      // Writing to /tmp is safe but doesn't match bash patterns
+      "echo hello > /tmp/test.txt",
+      "cp file /tmp/backup",
     ];
     for (const cmd of safe) {
       expect(somePatternMatches(cmd), `Matched safe command: ${cmd}`).toBe(false);
@@ -238,31 +351,26 @@ describe("DANGEROUS_PATTERNS", () => {
   });
 });
 
-// ── Combined: isOutsideWorkspace + isPiConfigDir ─────────────
+// ── Combined: write protection logic ─────────────
 
 describe("write protection logic", () => {
-  it("allows writes inside /workspace", () => {
+  it("allows writes inside workspace", () => {
     expect(isOutsideWorkspace("/workspace/src/index.ts")).toBe(false);
   });
 
-  it("allows writes to pi config dir even if outside /workspace", () => {
+  it("allows writes to pi config dir even if outside workspace", () => {
     expect(isOutsideWorkspace("/home/pi-user/.pi/agent/settings.json")).toBe(true);
-    expect(isPiConfigDir("/home/pi-user/.pi/agent/settings.json")).toBe(true);
+    expect(isAllowedPath("/home/pi-user/.pi/agent/settings.json")).toBe(true);
   });
 
-  it("blocks writes that are outside /workspace and not in pi config", () => {
+  it("allows writes to /tmp even if outside workspace", () => {
+    expect(isOutsideWorkspace("/tmp/build.log")).toBe(true);
+    expect(isAllowedPath("/tmp/build.log")).toBe(true);
+  });
+
+  it("blocks writes that are outside workspace and not in allowed paths", () => {
     expect(isOutsideWorkspace("/etc/passwd")).toBe(true);
-    expect(isPiConfigDir("/etc/passwd")).toBe(false);
-  });
-
-  it("allows writes inside custom workspace dir", () => {
-    expect(isOutsideWorkspace("/myproject/src/index.ts", "/myproject")).toBe(false);
-    expect(isOutsideWorkspace("/myproject", "/myproject")).toBe(false);
-  });
-
-  it("blocks writes outside custom workspace dir", () => {
-    expect(isOutsideWorkspace("/etc/passwd", "/myproject")).toBe(true);
-    expect(isOutsideWorkspace("/workspace/file", "/myproject")).toBe(true);
+    expect(isAllowedPath("/etc/passwd")).toBe(false);
   });
 });
 
