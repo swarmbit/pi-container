@@ -3,88 +3,53 @@
 // ============================================================
 // Tests the exported helper functions and pattern matching logic.
 // Read operations are verified to never be considered dangerous.
+//
+// The pi-coding-agent module is mocked since it's only available
+// at runtime inside the pi agent, not in this test environment.
 // ============================================================
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 
-// Import the extension's exported functions and patterns.
-// The extension is a pi package, but its logic can be tested
-// by importing the module directly.
-const extensionPath = "../.pi-container/package/extensions/confirm-dangerous/index";
+// Mock @earendil-works/pi-coding-agent before importing the extension
+vi.mock("@earendil-works/pi-coding-agent", () => ({
+  isToolCallEventType: vi.fn((toolName: string, event: any) => {
+    // Minimal mock: match based on event.toolName
+    return event?.toolName === toolName;
+  }),
+  default: {},
+}));
 
-// We use dynamic require because the extension uses TypeScript
-// and imports from @earendil-works/pi-coding-agent, which is
-// only available at runtime inside pi. We only need the
-// exported pure functions for testing.
-let isOutsideWorkspace: (filePath: string) => boolean;
-let isPiConfigDir: (filePath: string) => boolean;
-let DANGEROUS_PATTERNS: Array<{ pattern: RegExp; description: string }>;
-
-// The extension module has a top-level import from pi-coding-agent,
-// so we can't import it directly in the test environment.
-// Instead, we extract the pure functions and test them independently.
-// We'll define them here matching the extension source.
-
-function _isOutsideWorkspace(filePath: string): boolean {
-  const normalized = filePath.startsWith("/") ? filePath : `/workspace/${filePath}`;
-  return !normalized.startsWith("/workspace/") && normalized !== "/workspace";
-}
-
-function _isPiConfigDir(filePath: string): boolean {
-  return filePath.startsWith("/home/pi-user/.pi/");
-}
-
-const _DANGEROUS_PATTERNS: Array<{ pattern: RegExp; description: string }> = [
-  { pattern: /\brm\s+(-[a-zA-Z]*f[a-zA-Z]*\s+|.*--force\s+)/, description: "Force removal" },
-  { pattern: /\brm\s+-[a-zA-Z]*r[a-zA-Z]*\s/, description: "Recursive removal" },
-  { pattern: /\brm\s+--no-preserve-root/, description: "Root filesystem removal" },
-  { pattern: /\bsudo\s+/, description: "Sudo command" },
-  { pattern: /\bgit\s+push\s+.*(--force|-f)\b/, description: "Force push" },
-  { pattern: /\bgit\s+push\s+.*--delete\b/, description: "Delete remote branch" },
-  { pattern: /\bdd\s+/, description: "Low-level disk operation" },
-  { pattern: /\bmkfs\b/, description: "Format filesystem" },
-  { pattern: /\bmount\b/, description: "Mount filesystem" },
-  { pattern: /\bchown\s+/, description: "Change ownership" },
-  { pattern: /\bchmod\s+.*[0-7]{3,4}\s+/, description: "Permission change" },
-  { pattern: />\s*\/dev\//, description: "Write to device file" },
-  { pattern: /\bcurl\s+.*\|\s*(sudo\s+)?sh\b/, description: "Pipe curl to shell" },
-  { pattern: /\bwget\s+.*\|\s*(sudo\s+)?sh\b/, description: "Pipe wget to shell" },
-];
-
-// Use the locally-defined functions for testing (they match the extension exactly)
-const isOutsideWorkspaceTest = _isOutsideWorkspace;
-const isPiConfigDirTest = _isPiConfigDir;
-const DANGEROUS_PATTERNS_TEST = _DANGEROUS_PATTERNS;
+import { isOutsideWorkspace, isPiConfigDir, DANGEROUS_PATTERNS } from "./index";
 
 // ── isOutsideWorkspace ──────────────────────────────────────
 
 describe("isOutsideWorkspace", () => {
   it("allows paths inside /workspace", () => {
-    expect(isOutsideWorkspaceTest("/workspace/src/index.ts")).toBe(false);
-    expect(isOutsideWorkspaceTest("/workspace/.env")).toBe(false);
-    expect(isOutsideWorkspaceTest("/workspace/deep/nested/path.txt")).toBe(false);
+    expect(isOutsideWorkspace("/workspace/src/index.ts")).toBe(false);
+    expect(isOutsideWorkspace("/workspace/.env")).toBe(false);
+    expect(isOutsideWorkspace("/workspace/deep/nested/path.txt")).toBe(false);
   });
 
   it("allows /workspace itself", () => {
-    expect(isOutsideWorkspaceTest("/workspace")).toBe(false);
+    expect(isOutsideWorkspace("/workspace")).toBe(false);
   });
 
   it("allows relative paths (resolved to /workspace)", () => {
-    expect(isOutsideWorkspaceTest("src/index.ts")).toBe(false);
-    expect(isOutsideWorkspaceTest(".env")).toBe(false);
-    expect(isOutsideWorkspaceTest("deep/nested/path.txt")).toBe(false);
+    expect(isOutsideWorkspace("src/index.ts")).toBe(false);
+    expect(isOutsideWorkspace(".env")).toBe(false);
+    expect(isOutsideWorkspace("deep/nested/path.txt")).toBe(false);
   });
 
   it("blocks paths outside /workspace", () => {
-    expect(isOutsideWorkspaceTest("/etc/passwd")).toBe(true);
-    expect(isOutsideWorkspaceTest("/usr/bin/node")).toBe(true);
-    expect(isOutsideWorkspaceTest("/root/.ssh/id_rsa")).toBe(true);
-    expect(isOutsideWorkspaceTest("/home/pi-user/.bashrc")).toBe(true);
+    expect(isOutsideWorkspace("/etc/passwd")).toBe(true);
+    expect(isOutsideWorkspace("/usr/bin/node")).toBe(true);
+    expect(isOutsideWorkspace("/root/.ssh/id_rsa")).toBe(true);
+    expect(isOutsideWorkspace("/home/pi-user/.bashrc")).toBe(true);
   });
 
   it("blocks paths that start with /workspace but aren't under it", () => {
-    expect(isOutsideWorkspaceTest("/workspace-other/file")).toBe(true);
-    expect(isOutsideWorkspaceTest("/workspace2/file")).toBe(true);
+    expect(isOutsideWorkspace("/workspace-other/file")).toBe(true);
+    expect(isOutsideWorkspace("/workspace2/file")).toBe(true);
   });
 });
 
@@ -92,23 +57,23 @@ describe("isOutsideWorkspace", () => {
 
 describe("isPiConfigDir", () => {
   it("allows paths inside the pi config directory", () => {
-    expect(isPiConfigDirTest("/home/pi-user/.pi/agent/settings.json")).toBe(true);
-    expect(isPiConfigDirTest("/home/pi-user/.pi/agent/extensions")).toBe(true);
-    expect(isPiConfigDirTest("/home/pi-user/.pi/agent/sessions/abc.jsonl")).toBe(true);
-    expect(isPiConfigDirTest("/home/pi-user/.pi/agent/auth.json")).toBe(true);
+    expect(isPiConfigDir("/home/pi-user/.pi/agent/settings.json")).toBe(true);
+    expect(isPiConfigDir("/home/pi-user/.pi/agent/extensions")).toBe(true);
+    expect(isPiConfigDir("/home/pi-user/.pi/agent/sessions/abc.jsonl")).toBe(true);
+    expect(isPiConfigDir("/home/pi-user/.pi/agent/auth.json")).toBe(true);
   });
 
-  it("allows paths under /home/pi-user/.pi/ (full mount point)", () => {
-    expect(isPiConfigDirTest("/home/pi-user/.pi/agent")).toBe(true);
-    expect(isPiConfigDirTest("/home/pi-user/.pi/pi-container.yml")).toBe(true);
-    expect(isPiConfigDirTest("/home/pi-user/.pi/agent/extensions/my-ext/index.ts")).toBe(true);
+  it("allows paths under /home/pi-user/.pi/ (the full mount point)", () => {
+    expect(isPiConfigDir("/home/pi-user/.pi/agent")).toBe(true);
+    expect(isPiConfigDir("/home/pi-user/.pi/pi-container.yml")).toBe(true);
+    expect(isPiConfigDir("/home/pi-user/.pi/agent/extensions/my-ext/index.ts")).toBe(true);
   });
 
   it("blocks paths outside the pi config directory", () => {
-    expect(isPiConfigDirTest("/etc/passwd")).toBe(false);
-    expect(isPiConfigDirTest("/workspace/.env")).toBe(false);
-    expect(isPiConfigDirTest("/home/pi-user/.bashrc")).toBe(false);
-    expect(isPiConfigDirTest("/home/pi-user/.ssh/config")).toBe(false);
+    expect(isPiConfigDir("/etc/passwd")).toBe(false);
+    expect(isPiConfigDir("/workspace/.env")).toBe(false);
+    expect(isPiConfigDir("/home/pi-user/.bashrc")).toBe(false);
+    expect(isPiConfigDir("/home/pi-user/.ssh/config")).toBe(false);
   });
 });
 
@@ -116,7 +81,6 @@ describe("isPiConfigDir", () => {
 
 describe("read safety", () => {
   it("read commands are not matched by dangerous patterns", () => {
-    // Common read-only bash commands should never trigger dangerous patterns
     const safeCommands = [
       "cat /etc/passwd",
       "ls -la /",
@@ -145,7 +109,7 @@ describe("read safety", () => {
     ];
 
     for (const cmd of safeCommands) {
-      for (const { pattern, description } of DANGEROUS_PATTERNS_TEST) {
+      for (const { pattern, description } of DANGEROUS_PATTERNS) {
         expect(pattern.test(cmd), `${description} pattern matched safe command: ${cmd}`).toBe(false);
       }
     }
@@ -172,7 +136,6 @@ describe("DANGEROUS_PATTERNS", () => {
   });
 
   it("does not match plain rm", () => {
-    // rm without -r or -f is safe (deletes single files)
     expect(somePatternMatches("rm /tmp/file")).toBe(false);
   });
 
@@ -217,7 +180,6 @@ describe("DANGEROUS_PATTERNS", () => {
   });
 
   it("does not match chmod with symbolic mode", () => {
-    // chmod +x doesn't use octal, so the pattern shouldn't match
     expect(somePatternMatches("chmod +x script.sh")).toBe(false);
   });
 
@@ -263,25 +225,22 @@ describe("DANGEROUS_PATTERNS", () => {
 
 describe("write protection logic", () => {
   it("allows writes inside /workspace", () => {
-    // isOutsideWorkspace returns false → allow (no confirm needed)
-    expect(isOutsideWorkspaceTest("/workspace/src/index.ts")).toBe(false);
+    expect(isOutsideWorkspace("/workspace/src/index.ts")).toBe(false);
   });
 
   it("allows writes to pi config dir even if outside /workspace", () => {
-    // isOutsideWorkspace returns true, but isPiConfigDir returns true → allow
-    expect(isOutsideWorkspaceTest("/home/pi-user/.pi/agent/settings.json")).toBe(true);
-    expect(isPiConfigDirTest("/home/pi-user/.pi/agent/settings.json")).toBe(true);
+    expect(isOutsideWorkspace("/home/pi-user/.pi/agent/settings.json")).toBe(true);
+    expect(isPiConfigDir("/home/pi-user/.pi/agent/settings.json")).toBe(true);
   });
 
   it("blocks writes that are outside /workspace and not in pi config", () => {
-    // isOutsideWorkspace returns true, isPiConfigDir returns false → confirm
-    expect(isOutsideWorkspaceTest("/etc/passwd")).toBe(true);
-    expect(isPiConfigDirTest("/etc/passwd")).toBe(false);
+    expect(isOutsideWorkspace("/etc/passwd")).toBe(true);
+    expect(isPiConfigDir("/etc/passwd")).toBe(false);
   });
 });
 
 // ── Helpers ───────────────────────────────────────────────────
 
 function somePatternMatches(command: string): boolean {
-  return DANGEROUS_PATTERNS_TEST.some(({ pattern }) => pattern.test(command));
+  return DANGEROUS_PATTERNS.some(({ pattern }) => pattern.test(command));
 }
