@@ -1,17 +1,17 @@
 // ============================================================
 // pi-container — Config discovery and loading
 // ============================================================
-// Finds .pi-container/ directory and loads config from three
+// Finds .pi/ directory and loads config from three
 // sources with clear precedence.
 //
 // Config precedence (highest wins):
 //   1. Environment variables (PI_VERSION, PI_IMAGE_TAG, PI_CONFIG_DIR)
 //   2. User config            (~/.pi/pi-container.yml)
-//   3. Project config           (.pi-container/config.yml)
+//   3. Project config           (.pi/config.yml)
 //   4. Built-in defaults
 //
 // This means:
-//   - Team sets defaults in .pi-container/config.yml (committed to git)
+//   - Team sets defaults in .pi/config.yml (committed to git)
 //   - Individual user overrides in ~/.pi/pi-container.yml (personal, not committed)
 //   - One-off overrides via environment variables (ephemeral)
 // ============================================================
@@ -33,12 +33,12 @@ export interface PiContainerConfig {
   piVersion: string;
   imageTag: string;
   configDir: string; // absolute host path (~/.pi)
-  containerDir: string; // absolute path to .pi-container dir, "" if none
+  containerDir: string; // absolute path to .pi dir, "" if none
   projectDir: string; // absolute path — CWD, the workspace mount source
   workspaceDir: string; // container path — e.g. /workspace or /myproject
   envFile: string; // absolute path to .env, "" if none
-  hasPackage: boolean; // .pi-container/package/ exists
-  hasSettings: boolean; // .pi-container/settings/default-settings.json exists
+  hasPackage: boolean; // .pi/package/ exists
+  hasSettings: boolean; // .pi/settings/default-settings.json exists
   packages: string[]; // third-party packages from config.yml
   ports: PortMapping[]; // port mappings (host:container)
 }
@@ -63,7 +63,7 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig {
   const containerDir = findContainerDir(projectDir);
   const homeDir = options?.homeDir ?? getHomeDir();
 
-  // Load project config: .pi-container/config.yml (team-committed)
+  // Load project config: .pi/config.yml (team-committed)
   let projectConfig: ConfigFile = {};
   if (containerDir) {
     const configPath = path.join(containerDir, "config.yml");
@@ -141,7 +141,7 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig {
 }
 
 function findContainerDir(projectDir: string): string {
-  const candidate = path.join(projectDir, ".pi-container");
+  const candidate = path.join(projectDir, ".pi");
   if (fs.existsSync(candidate)) {
     return candidate;
   }

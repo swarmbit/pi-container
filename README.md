@@ -10,7 +10,7 @@ Running pi in Docker ensures every team member uses the same environment — sam
 
 - **CWD-respect mounts**: uses `docker run` directly, so `$(pwd)/` is always mounted as `/<dirname>`
 - **One install**: `npm install -g pi-container` works from any directory
-- **Project customization**: `.pi-container/` is optional — only needed for team customization
+- **Project customization**: `.pi/` is optional — only needed for team customization
 
 ## Install
 
@@ -96,13 +96,13 @@ Run `pi-container` from any directory. It uses defaults:
 - image tag: `pi-agent:<version>`
 - config dir: `~/.pi`
 
-### Project config: `.pi-container/`
+### Project config: `.pi/`
 
-Place a `.pi-container/` directory in your project root to customize:
+Place a `.pi/` directory in your project root to customize:
 
 ```
 my-project/
-├── .pi-container/
+├── .pi/
 │   ├── config.yml                # Optional overrides
 │   ├── package/                   # Team pi package (baked into image)
 │   │   ├── package.json           # Pi package manifest
@@ -116,7 +116,7 @@ my-project/
 └── .env                          # API keys (gitignored)
 ```
 
-#### `.pi-container/package/package.json`
+#### `.pi/package/package.json`
 
 The [pi package](https://github.com/earendil-works/pi-coding-agent) manifest declares what resources the package provides:
 
@@ -138,7 +138,7 @@ The [pi package](https://github.com/earendil-works/pi-coding-agent) manifest dec
 
 Pi convention directories (`extensions/`, `themes/`, `skills/`, `prompts/`) are auto-discovered. You can also add runtime dependencies to `dependencies` — they'll be installed during the Docker build.
 
-#### `.pi-container/config.yml` (optional)
+#### `.pi/config.yml` (optional)
 
 ```yaml
 piVersion: "0.75.5"
@@ -183,7 +183,7 @@ This file is not committed to git — it's for individual user preferences.
 1. CLI flags (`-p`, `--port`)
 2. Environment variables (`PI_VERSION`, `PI_IMAGE_TAG`, `PI_CONFIG_DIR`, `PI_PORTS`)
 3. User config (`~/.pi/pi-container.yml`) — personal, not committed
-4. Project config (`.pi-container/config.yml`) — team, committed to git
+4. Project config (`.pi/config.yml`) — team, committed to git
 5. Built-in defaults
 
 ### API keys
@@ -233,7 +233,7 @@ PI_PORTS=3000,6006 pi-container
 PI_PORTS=3000,8080:3000,9000-9010 pi-container   # ranges supported in env/config
 
 # Config file
-# .pi-container/config.yml
+# .pi/config.yml
 ports:
   - 3000
   - 6006

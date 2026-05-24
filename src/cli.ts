@@ -12,7 +12,7 @@
 // Config precedence (highest wins):
 //   1. Environment variables (PI_VERSION, PI_IMAGE_TAG, PI_CONFIG_DIR)
 //   2. User config            (~/.pi/pi-container.yml)
-//   3. Project config           (.pi-container/config.yml)
+//   3. Project config           (.pi/config.yml)
 //   4. Built-in defaults
 // ============================================================
 
@@ -60,17 +60,17 @@ Environment:
 Config precedence (highest wins):
   1. Environment variables
   2. User config:    ${userConfigPath}
-  3. Project config: .pi-container/config.yml
+  3. Project config: .pi/config.yml
   4. Built-in defaults
 
 Project config:
-  Place a .pi-container/ directory in your project root:
-    .pi-container/config.yml          — pi version, image tag, ports, packages
-    .pi-container/package/            — team pi package (extensions, themes, skills)
-    .pi-container/package/package.json — pi package manifest
-    .pi-container/settings/           — default settings template
+  Place a .pi/ directory in your project root:
+    .pi/config.yml              — pi version, image tag, ports, packages
+    .pi/package/                — team pi package (extensions, themes, skills)
+    .pi/package/package.json    — pi package manifest
+    .pi/settings/               — default settings template
 
-  Example .pi-container/config.yml:
+  Example .pi/config.yml:
     piVersion: "0.75.5"
     ports:
       - 3000        # dev server
@@ -161,13 +161,10 @@ async function main(): Promise<void> {
     }
   }
 
-  // Load config from .pi-container/, user config, and environment
+  // Load config from .pi/, user config, and environment
   const config = loadConfig({ cliPorts });
 
-  // Ensure pi config directory exists on host
-  for (const sub of ["sessions", "extensions", "npm", "git", "prompts", "skills"]) {
-    fs.mkdirSync(path.join(config.configDir, sub), { recursive: true });
-  }
+  fs.mkdirSync(path.join(config.configDir), { recursive: true });
 
   // Check port availability before running
   if ((command === "run" || command === "shell") && config.ports.length > 0) {
@@ -179,7 +176,7 @@ async function main(): Promise<void> {
       }
       console.error("");
       console.error("To fix, either:");
-      console.error("  - Change the host port in .pi-container/config.yml (e.g., \"3001:3000\")");
+      console.error("  - Change the host port in .pi/config.yml (e.g., \"3001:3000\")");
       console.error("  - Stop the process using the port");
       process.exit(1);
     }
@@ -247,7 +244,7 @@ function printDryRun(config: PiContainerConfig, piArgs: string[]): void {
   console.log();
   console.log("Config sources:");
   console.log(`  User config:    ${userConfigPath} ${userConfigExists ? "(found)" : "(not found)"}`);
-  console.log(`  Project config: ${config.containerDir ? config.containerDir + "/config.yml" : "(no .pi-container dir)"}`);
+  console.log(`  Project config: ${config.containerDir ? config.containerDir + "/config.yml" : "(no .pi dir)"}`);
   console.log(`  .env file:      ${config.envFile || "(none)"}`);
   console.log();
   const command = piArgs.length > 0 ? piArgs : ["pi"];

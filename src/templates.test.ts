@@ -11,7 +11,7 @@ function makeConfig(overrides: Partial<PiContainerConfig> = {}): PiContainerConf
     piVersion: "0.75.5",
     imageTag: "pi-agent:0.75.5",
     configDir: "/home/user/.pi",
-    containerDir: "/project/.pi-container",
+    containerDir: "/project/.pi",
     projectDir: "/project",
     workspaceDir: "/project",
     envFile: "",
@@ -162,15 +162,11 @@ describe("generateEntrypoint", () => {
     expect(sh).toContain("${HOST_GID:-1000}");
   });
 
-  it("creates pi config directory structure", () => {
+  it("references pi config paths", () => {
     const config = makeConfig();
     const sh = generateEntrypoint(config);
 
     expect(sh).toContain('PI_AGENT_HOME="${PI_HOME}/agent"');
-    expect(sh).toContain('"${PI_AGENT_HOME}/sessions"');
-    expect(sh).toContain('"${PI_AGENT_HOME}/extensions"');
-    expect(sh).toContain('"${PI_AGENT_HOME}/npm"');
-    expect(sh).toContain('"${PI_AGENT_HOME}/git"');
   });
 
   it("fixes ownership of config directory", () => {

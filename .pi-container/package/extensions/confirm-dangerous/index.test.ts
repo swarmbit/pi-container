@@ -10,6 +10,14 @@
 
 import { describe, it, expect, vi } from "vitest";
 
+// Clear env var so the default /workspace is used in tests.
+// In production this is set by pi-container, but tests need the default.
+vi.hoisted(() => {
+  const orig = process.env.WORKSPACE_DIR;
+  delete process.env.WORKSPACE_DIR;
+  return { orig };
+});
+
 // Mock @earendil-works/pi-coding-agent before importing the extension
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   isToolCallEventType: vi.fn((toolName: string, event: any) => {

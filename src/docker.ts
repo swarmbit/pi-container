@@ -9,7 +9,7 @@
 //     resolve relative to CWD — fixes the mounting bug
 //   - Fresh container per invocation — no state to manage
 //   - Build context is a temp directory created per build,
-//     incorporating only what's needed from .pi-container/
+//     incorporating only what's needed from .pi/
 // ============================================================
 
 import * as path from "path";

@@ -81,7 +81,7 @@ describe("CLI dry-run", () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it("shows configuration with no .pi-container", () => {
+  it("shows configuration with no .pi", () => {
     const output = runCli("dry-run", { cwd: tmpDir });
 
     expect(output).toContain("piVersion:");
@@ -93,11 +93,11 @@ describe("CLI dry-run", () => {
     expect(output).toContain("(none)"); // no containerDir, no envFile
   });
 
-  it("detects .pi-container directory", () => {
-    fs.mkdirSync(path.join(tmpDir, ".pi-container"));
+  it("detects .pi directory", () => {
+    fs.mkdirSync(path.join(tmpDir, ".pi"));
     const output = runCli("dry-run", { cwd: tmpDir });
 
-    expect(output).toContain(tmpDir + "/.pi-container");
+    expect(output).toContain(tmpDir + "/.pi");
   });
 
   it("shows docker run command with correct volume mounts", () => {
@@ -134,7 +134,7 @@ describe("CLI dry-run", () => {
   });
 
   it("detects package directory", () => {
-    const pkgDir = path.join(tmpDir, ".pi-container", "package");
+    const pkgDir = path.join(tmpDir, ".pi", "package");
     fs.mkdirSync(pkgDir, { recursive: true });
     fs.writeFileSync(
       path.join(pkgDir, "package.json"),
@@ -147,7 +147,7 @@ describe("CLI dry-run", () => {
   });
 
   it("detects settings directory", () => {
-    const settingsDir = path.join(tmpDir, ".pi-container", "settings");
+    const settingsDir = path.join(tmpDir, ".pi", "settings");
     fs.mkdirSync(settingsDir, { recursive: true });
     fs.writeFileSync(
       path.join(settingsDir, "default-settings.json"),
@@ -160,7 +160,7 @@ describe("CLI dry-run", () => {
   });
 
   it("shows packages from config.yml", () => {
-    const containerDir = path.join(tmpDir, ".pi-container");
+    const containerDir = path.join(tmpDir, ".pi");
     fs.mkdirSync(containerDir, { recursive: true });
     fs.writeFileSync(
       path.join(containerDir, "config.yml"),

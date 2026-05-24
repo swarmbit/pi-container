@@ -18,14 +18,6 @@ if [ "$(id -u pi-user)" != "${HOST_UID}" ]; then
   usermod -u "${HOST_UID}" -g "${HOST_GID}" pi-user 2>/dev/null || true
 fi
 
-# ── Ensure directory structure exists ──────────────────
-mkdir -p "${PI_AGENT_HOME}/sessions"
-mkdir -p "${PI_AGENT_HOME}/extensions"
-mkdir -p "${PI_AGENT_HOME}/npm"
-mkdir -p "${PI_AGENT_HOME}/git"
-mkdir -p "${PI_AGENT_HOME}/prompts"
-mkdir -p "${PI_AGENT_HOME}/skills"
-
 # ── Fix ownership of config directory ──────────────────
 chown -R pi-user:pi-user "${PI_HOME}" 2>/dev/null || true
 
@@ -51,7 +43,7 @@ gosu pi-user pi install npm:pi-tps
 
 # ── Install additional team packages ────────────────────
 # TEAM_PACKAGES is a comma-separated list set via -e in
-# docker run, sourced from .pi-container/config.yml.
+# docker run, sourced from .pi/config.yml.
 # pi install is idempotent — already-registered packages
 # are skipped on subsequent runs.
 if [ -n "${TEAM_PACKAGES}" ]; then

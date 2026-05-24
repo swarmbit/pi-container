@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 describe("loadConfig", () => {
-  it("uses defaults when no .pi-container/ directory exists", () => {
+  it("uses defaults when no .pi/ directory exists", () => {
     process.chdir(tmpDir);
     const config = loadConfig({ homeDir: tmpDir });
 
@@ -40,8 +40,8 @@ describe("loadConfig", () => {
     expect(config.ports).toEqual([]);
   });
 
-  it("discovers .pi-container/ in CWD", () => {
-    const containerDir = path.join(tmpDir, ".pi-container");
+  it("discovers .pi/ in CWD", () => {
+    const containerDir = path.join(tmpDir, ".pi");
     fs.mkdirSync(containerDir);
     process.chdir(tmpDir);
 
@@ -50,7 +50,7 @@ describe("loadConfig", () => {
   });
 
   it("detects package directory", () => {
-    const pkgDir = path.join(tmpDir, ".pi-container", "package");
+    const pkgDir = path.join(tmpDir, ".pi", "package");
     fs.mkdirSync(pkgDir, { recursive: true });
     fs.writeFileSync(
       path.join(pkgDir, "package.json"),
@@ -63,7 +63,7 @@ describe("loadConfig", () => {
   });
 
   it("detects package directory with extensions and themes", () => {
-    const pkgDir = path.join(tmpDir, ".pi-container", "package");
+    const pkgDir = path.join(tmpDir, ".pi", "package");
     const extDir = path.join(pkgDir, "extensions", "my-ext");
     fs.mkdirSync(extDir, { recursive: true });
     fs.writeFileSync(path.join(extDir, "index.ts"), "export default function() {}");
@@ -81,7 +81,7 @@ describe("loadConfig", () => {
   });
 
   it("detects settings", () => {
-    const settingsDir = path.join(tmpDir, ".pi-container", "settings");
+    const settingsDir = path.join(tmpDir, ".pi", "settings");
     fs.mkdirSync(settingsDir, { recursive: true });
     fs.writeFileSync(
       path.join(settingsDir, "default-settings.json"),
@@ -112,7 +112,7 @@ describe("loadConfig", () => {
   describe("precedence", () => {
     it("env vars override everything", () => {
       // Set up project config
-      const containerDir = path.join(tmpDir, ".pi-container");
+      const containerDir = path.join(tmpDir, ".pi");
       fs.mkdirSync(containerDir, { recursive: true });
       fs.writeFileSync(
         path.join(containerDir, "config.yml"),
@@ -139,7 +139,7 @@ describe("loadConfig", () => {
 
     it("user config overrides project config", () => {
       // Set up project config
-      const containerDir = path.join(tmpDir, ".pi-container");
+      const containerDir = path.join(tmpDir, ".pi");
       fs.mkdirSync(containerDir, { recursive: true });
       fs.writeFileSync(
         path.join(containerDir, "config.yml"),
@@ -163,7 +163,7 @@ describe("loadConfig", () => {
     });
 
     it("project config overrides defaults", () => {
-      const containerDir = path.join(tmpDir, ".pi-container");
+      const containerDir = path.join(tmpDir, ".pi");
       fs.mkdirSync(containerDir, { recursive: true });
       fs.writeFileSync(
         path.join(containerDir, "config.yml"),
@@ -239,8 +239,8 @@ describe("loadConfig", () => {
     });
 
     it("project config is missing — falls back gracefully", () => {
-      // No .pi-container/config.yml, just the directory
-      fs.mkdirSync(path.join(tmpDir, ".pi-container"), { recursive: true });
+      // No .pi/config.yml, just the directory
+      fs.mkdirSync(path.join(tmpDir, ".pi"), { recursive: true });
       process.chdir(tmpDir);
       const config = loadConfig({ homeDir: tmpDir });
       expect(config.piVersion).toBe("0.75.5");
@@ -271,7 +271,7 @@ describe("loadConfig", () => {
     });
 
     it("loads packages from project config", () => {
-      const containerDir = path.join(tmpDir, ".pi-container");
+      const containerDir = path.join(tmpDir, ".pi");
       fs.mkdirSync(containerDir, { recursive: true });
       fs.writeFileSync(
         path.join(containerDir, "config.yml"),
@@ -287,7 +287,7 @@ describe("loadConfig", () => {
     });
 
     it("returns empty packages when config has no packages field", () => {
-      const containerDir = path.join(tmpDir, ".pi-container");
+      const containerDir = path.join(tmpDir, ".pi");
       fs.mkdirSync(containerDir, { recursive: true });
       fs.writeFileSync(
         path.join(containerDir, "config.yml"),
@@ -347,7 +347,7 @@ describe("loadConfig", () => {
     });
 
     it("parses ports from project config", () => {
-      const containerDir = path.join(tmpDir, ".pi-container");
+      const containerDir = path.join(tmpDir, ".pi");
       fs.mkdirSync(containerDir, { recursive: true });
       fs.writeFileSync(
         path.join(containerDir, "config.yml"),
@@ -383,7 +383,7 @@ describe("loadConfig", () => {
     });
 
     it("env ports override config ports on conflict", () => {
-      const containerDir = path.join(tmpDir, ".pi-container");
+      const containerDir = path.join(tmpDir, ".pi");
       fs.mkdirSync(containerDir, { recursive: true });
       fs.writeFileSync(
         path.join(containerDir, "config.yml"),

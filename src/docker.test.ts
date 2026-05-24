@@ -236,8 +236,8 @@ describe("createBuildContext (via buildImage internals)", () => {
     expect(entrypoint).toContain('exec gosu pi-user "$@"');
   });
 
-  it("creates placeholder package when no .pi-container exists", () => {
-    // Simulate the build context for a project without .pi-container/
+  it("creates placeholder package when no .pi exists", () => {
+    // Simulate the build context for a project without .pi/
     const buildCtxDir = path.join(tmpDir, "build-ctx");
     fs.mkdirSync(buildCtxDir, { recursive: true });
 
