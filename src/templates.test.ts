@@ -189,11 +189,12 @@ describe("generateEntrypoint", () => {
     expect(sh).toContain('if [ ! -f "${PI_SETTINGS}" ]; then');
   });
 
-  it("installs the team package via pi install", () => {
+  it("installs the team package and default third-party packages via pi install", () => {
     const config = makeConfig();
     const sh = generateEntrypoint(config);
 
     expect(sh).toContain("gosu pi-user pi install /opt/pi-package");
+    expect(sh).toContain("gosu pi-user pi install npm:pi-tps");
   });
 
   it("installs additional team packages from TEAM_PACKAGES", () => {
