@@ -5,5 +5,8 @@
   "description": "Prompts before destructive commands, system path writes, and pi config modifications",
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
   }
 }
