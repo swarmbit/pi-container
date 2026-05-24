@@ -65,17 +65,20 @@ Config precedence (highest wins):
 
 Project config:
   Place a .pi-container/ directory in your project root:
-    .pi-container/config.yml          — pi version, image tag, port overrides
-    .pi-container/extensions/         — team extensions (baked into image)
-    .pi-container/packages/           — team npm packages
+    .pi-container/config.yml          — pi version, image tag, ports, packages
+    .pi-container/package/            — team pi package (extensions, themes, skills)
+    .pi-container/package/package.json — pi package manifest
     .pi-container/settings/           — default settings template
 
-  Example .pi-container/config.yml with ports:
+  Example .pi-container/config.yml:
     piVersion: "0.75.5"
     ports:
       - 3000        # dev server
       - 6006        # storybook
       - 8080:80     # host 8080 → container 80
+    packages:
+      - npm:@some-team/safety-ext@1.0.0
+      - git:github.com/team/repo@v2
 
 User config:
   Create ${userConfigPath} for personal overrides:
@@ -221,9 +224,16 @@ function printDryRun(config: PiContainerConfig, piArgs: string[]): void {
   console.log(`  configDir:      ${config.configDir}`);
   console.log(`  envFile:        ${config.envFile || "(none)"}`);
   console.log(`  containerDir:   ${config.containerDir || "(none)"}`);
-  console.log(`  extensions:     ${config.extensions.length > 0 ? config.extensions.join(", ") : "(none)"}`);
-  console.log(`  hasPackages:    ${config.hasPackages}`);
+  console.log(`  hasPackage:    ${config.hasPackage}`);
   console.log(`  hasSettings:    ${config.hasSettings}`);
+  if (config.packages.length > 0) {
+    console.log(`  packages:`);
+    for (const pkg of config.packages) {
+      console.log(`    - ${pkg}`);
+    }
+  } else {
+    console.log(`  packages:       (none)`);
+  }
   if (config.ports.length > 0) {
     console.log("  ports:");
     for (const p of config.ports) {

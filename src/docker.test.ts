@@ -18,9 +18,9 @@ function makeConfig(overrides: Partial<PiContainerConfig> = {}): PiContainerConf
     containerDir: "",
     projectDir: "/project",
     envFile: "",
-    extensions: [],
-    hasPackages: false,
+    hasPackage: false,
     hasSettings: false,
+    packages: [],
     ports: [],
     ...overrides,
   };
@@ -114,8 +114,6 @@ describe("buildDockerRunArgs", () => {
 
   it("allocates TTY when stdin is a TTY", () => {
     const config = makeConfig();
-    const originalIsTTY = process.stdin.isTTY;
-    // Can't easily mock process.stdin.isTTY, so just verify -it or -i is present
     const args = buildDockerRunArgs(config, ["pi"]);
 
     // Should have either -it or -i
@@ -176,6 +174,26 @@ describe("buildDockerRunArgs", () => {
     const imageIdx = args.indexOf(config.imageTag);
     expect(pIdx).toBeLessThan(imageIdx);
   });
+
+  it("passes TEAM_PACKAGES env var when packages are configured", () => {
+    const config = makeConfig({
+      packages: ["npm:@some-team/ext@1.0.0", "git:github.com/team/repo@v2"],
+    });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const eIdx = args.indexOf("-e");
+    expect(eIdx).toBeGreaterThan(-1);
+    const teamPackagesEntry = args.find((a) => a.startsWith("TEAM_PACKAGES="));
+    expect(teamPackagesEntry).toBe("TEAM_PACKAGES=npm:@some-team/ext@1.0.0,git:github.com/team/repo@v2");
+  });
+
+  it("does not pass TEAM_PACKAGES when no packages configured", () => {
+    const config = makeConfig({ packages: [] });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const teamPackagesEntry = args.find((a) => a.startsWith("TEAM_PACKAGES="));
+    expect(teamPackagesEntry).toBeUndefined();
+  });
 });
 
 describe("createBuildContext (via buildImage internals)", () => {
@@ -203,20 +221,27 @@ describe("createBuildContext (via buildImage internals)", () => {
     expect(entrypoint).toContain('exec gosu pi-user "$@"');
   });
 
-  it("creates placeholder files when no .pi-container exists", () => {
+  it("creates placeholder package when no .pi-container exists", () => {
     // Simulate the build context for a project without .pi-container/
     const buildCtxDir = path.join(tmpDir, "build-ctx");
     fs.mkdirSync(buildCtxDir, { recursive: true });
 
-    // Empty extensions (just .gitkeep)
-    fs.mkdirSync(path.join(buildCtxDir, "extensions"), { recursive: true });
-    fs.writeFileSync(path.join(buildCtxDir, "extensions", ".gitkeep"), "");
-
-    // Minimal packages
-    fs.mkdirSync(path.join(buildCtxDir, "packages"), { recursive: true });
+    // Placeholder package (minimal)
+    fs.mkdirSync(path.join(buildCtxDir, "package", "extensions"), { recursive: true });
+    fs.mkdirSync(path.join(buildCtxDir, "package", "themes"), { recursive: true });
+    fs.writeFileSync(path.join(buildCtxDir, "package", "extensions", ".gitkeep"), "");
+    fs.writeFileSync(path.join(buildCtxDir, "package", "themes", ".gitkeep"), "");
     fs.writeFileSync(
-      path.join(buildCtxDir, "packages", "package.json"),
-      JSON.stringify({ name: "pi-container-packages", version: "1.0.0", private: true, dependencies: {} })
+      path.join(buildCtxDir, "package", "package.json"),
+      JSON.stringify({
+        name: "pi-container-defaults",
+        version: "1.0.0",
+        private: true,
+        description: "No customizations",
+        keywords: ["pi-package"],
+        pi: { extensions: ["./extensions"], themes: ["./themes"] },
+        peerDependencies: { "@earendil-works/pi-coding-agent": "*" },
+      }, null, 2)
     );
 
     // Default settings
@@ -227,8 +252,9 @@ describe("createBuildContext (via buildImage internals)", () => {
     );
 
     // Verify all expected files exist
-    expect(fs.existsSync(path.join(buildCtxDir, "extensions", ".gitkeep"))).toBe(true);
-    expect(fs.existsSync(path.join(buildCtxDir, "packages", "package.json"))).toBe(true);
+    expect(fs.existsSync(path.join(buildCtxDir, "package", "package.json"))).toBe(true);
+    expect(fs.existsSync(path.join(buildCtxDir, "package", "extensions", ".gitkeep"))).toBe(true);
+    expect(fs.existsSync(path.join(buildCtxDir, "package", "themes", ".gitkeep"))).toBe(true);
     expect(fs.existsSync(path.join(buildCtxDir, "settings", "default-settings.json"))).toBe(true);
   });
 });

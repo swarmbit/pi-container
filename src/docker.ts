@@ -120,6 +120,11 @@ export function buildDockerRunArgs(config: PiContainerConfig, command: string[])
     args.push("--env-file", config.envFile);
   }
 
+  // Team packages (comma-separated list for the entrypoint to install)
+  if (config.packages.length > 0) {
+    args.push("-e", `TEAM_PACKAGES=${config.packages.join(",")}`);
+  }
+
   // Port mappings (localhost only)
   for (const port of config.ports) {
     args.push("-p", `127.0.0.1:${port.host}:${port.container}`);
@@ -148,8 +153,7 @@ export function buildDockerRunArgs(config: PiContainerConfig, command: string[])
 // Creates a temp directory with everything needed for `docker build`:
 //   - Dockerfile (generated from template)
 //   - entrypoint.sh (generated from template)
-//   - extensions/ (from project, or empty placeholder)
-//   - packages/ (from project, or minimal default)
+//   - package/ (from project, or minimal placeholder)
 //   - settings/ (from project, or minimal default)
 //
 // The Dockerfile always expects these directories to exist.
@@ -166,33 +170,32 @@ function createBuildContext(config: PiContainerConfig): string {
   const entrypoint = generateEntrypoint(config);
   fs.writeFileSync(path.join(tmpDir, "entrypoint.sh"), entrypoint);
 
-  // Copy team extensions (or create empty placeholder)
-  if (config.containerDir && config.extensions.length > 0) {
-    const extSrc = path.join(config.containerDir, "extensions");
-    copyDir(extSrc, path.join(tmpDir, "extensions"));
+  // Copy team package (or create minimal placeholder)
+  if (config.containerDir && config.hasPackage) {
+    const pkgSrc = path.join(config.containerDir, "package");
+    copyDir(pkgSrc, path.join(tmpDir, "package"));
   } else {
-    // Empty directory — the entrypoint's for loop will iterate
-    // over /opt/pi-extensions/* and find nothing to link.
-    fs.mkdirSync(path.join(tmpDir, "extensions"), { recursive: true });
-    // Docker COPY of a truly empty directory can fail; add .gitkeep
-    fs.writeFileSync(path.join(tmpDir, "extensions", ".gitkeep"), "");
-  }
-
-  // Copy team packages (or create minimal default)
-  if (config.containerDir && config.hasPackages) {
-    const pkgSrc = path.join(config.containerDir, "packages");
-    copyDir(pkgSrc, path.join(tmpDir, "packages"));
-  } else {
-    // Minimal package.json so npm install succeeds (creates empty node_modules)
-    fs.mkdirSync(path.join(tmpDir, "packages"), { recursive: true });
+    // Minimal placeholder package so pi install /opt/pi-package succeeds
+    fs.mkdirSync(path.join(tmpDir, "package", "extensions"), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, "package", "themes"), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, "package", "extensions", ".gitkeep"), "");
+    fs.writeFileSync(path.join(tmpDir, "package", "themes", ".gitkeep"), "");
     fs.writeFileSync(
-      path.join(tmpDir, "packages", "package.json"),
+      path.join(tmpDir, "package", "package.json"),
       JSON.stringify(
         {
-          name: "pi-container-packages",
+          name: "pi-container-defaults",
           version: "1.0.0",
           private: true,
-          dependencies: {},
+          description: "No customizations",
+          keywords: ["pi-package"],
+          pi: {
+            extensions: ["./extensions"],
+            themes: ["./themes"],
+          },
+          peerDependencies: {
+            "@earendil-works/pi-coding-agent": "*",
+          },
         },
         null,
         2

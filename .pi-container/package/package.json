@@ -1,0 +1,14 @@
+{
+  "name": "pi-container-defaults",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Default extensions and theme for pi-container",
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./extensions"],
+    "themes": ["./themes"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

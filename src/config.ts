@@ -36,9 +36,9 @@ export interface PiContainerConfig {
   containerDir: string; // absolute path to .pi-container dir, "" if none
   projectDir: string; // absolute path — CWD, the workspace mount source
   envFile: string; // absolute path to .env, "" if none
-  extensions: string[]; // extension directory names found
-  hasPackages: boolean;
-  hasSettings: boolean;
+  hasPackage: boolean; // .pi-container/package/ exists
+  hasSettings: boolean; // .pi-container/settings/default-settings.json exists
+  packages: string[]; // third-party packages from config.yml
   ports: PortMapping[]; // port mappings (host:container)
 }
 
@@ -47,6 +47,7 @@ interface ConfigFile {
   imageTag?: string;
   configDir?: string;
   ports?: (number | string)[];
+  packages?: string[];
 }
 
 export interface LoadConfigOptions {
@@ -103,36 +104,18 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig {
   // Resolve .env file
   const envFile = findEnvFile(projectDir);
 
-  // Discover extensions (only from project .pi-container/)
-  const extensions: string[] = [];
-  let hasPackages = false;
-  let hasSettings = false;
+  // Discover package directory
+  const hasPackage = containerDir
+    ? fs.existsSync(path.join(containerDir, "package", "package.json"))
+    : false;
 
-  if (containerDir) {
-    const extDir = path.join(containerDir, "extensions");
-    if (fs.existsSync(extDir)) {
-      for (const entry of fs.readdirSync(extDir, { withFileTypes: true })) {
-        if (entry.isDirectory()) {
-          // Only include extensions that have an index.ts or index.js
-          const indexPath = path.join(extDir, entry.name, "index.ts");
-          const indexPathJs = path.join(extDir, entry.name, "index.js");
-          if (fs.existsSync(indexPath) || fs.existsSync(indexPathJs)) {
-            extensions.push(entry.name);
-          }
-        }
-      }
-    }
+  // Discover settings
+  const hasSettings = containerDir
+    ? fs.existsSync(path.join(containerDir, "settings", "default-settings.json"))
+    : false;
 
-    const packagesDir = path.join(containerDir, "packages");
-    hasPackages =
-      fs.existsSync(path.join(packagesDir, "package.json")) &&
-      Object.keys(
-        JSON.parse(fs.readFileSync(path.join(packagesDir, "package.json"), "utf-8")).dependencies ||
-          {}
-      ).length > 0;
-
-    hasSettings = fs.existsSync(path.join(containerDir, "settings", "default-settings.json"));
-  }
+  // Resolve packages from project config (third-party packages to pre-install)
+  const packages = projectConfig.packages ?? [];
 
   // Resolve port mappings: CLI > env > user config > project config
   const cliPorts: PortMapping[] = (options?.cliPorts ?? []).map(parsePortMapping);
@@ -148,9 +131,9 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig {
     containerDir,
     projectDir,
     envFile,
-    extensions,
-    hasPackages,
+    hasPackage,
     hasSettings,
+    packages,
     ports,
   };
 }

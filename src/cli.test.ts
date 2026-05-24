@@ -137,16 +137,51 @@ describe("CLI dry-run", () => {
     expect(output).toContain(".env");
   });
 
-  it("detects extensions", () => {
-    const extDir = path.join(tmpDir, ".pi-container", "extensions", "test-ext");
-    fs.mkdirSync(extDir, { recursive: true });
-    fs.writeFileSync(path.join(extDir, "index.ts"), "export default function() {}");
+  it("detects package directory", () => {
+    const pkgDir = path.join(tmpDir, ".pi-container", "package");
+    fs.mkdirSync(pkgDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(pkgDir, "package.json"),
+      JSON.stringify({ name: "test-pkg", pi: { extensions: ["./extensions"] } })
+    );
 
     const output = execSync(`node ${CLI_PATH} dry-run`, {
       encoding: "utf-8",
       cwd: tmpDir,
     });
 
-    expect(output).toContain("test-ext");
+    expect(output).toContain("hasPackage");
+  });
+
+  it("detects settings directory", () => {
+    const settingsDir = path.join(tmpDir, ".pi-container", "settings");
+    fs.mkdirSync(settingsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(settingsDir, "default-settings.json"),
+      JSON.stringify({ theme: "github" })
+    );
+
+    const output = execSync(`node ${CLI_PATH} dry-run`, {
+      encoding: "utf-8",
+      cwd: tmpDir,
+    });
+
+    expect(output).toContain("hasSettings");
+  });
+
+  it("shows packages from config.yml", () => {
+    const containerDir = path.join(tmpDir, ".pi-container");
+    fs.mkdirSync(containerDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(containerDir, "config.yml"),
+      "packages:\n  - npm:@some-team/ext@1.0.0"
+    );
+
+    const output = execSync(`node ${CLI_PATH} dry-run`, {
+      encoding: "utf-8",
+      cwd: tmpDir,
+    });
+
+    expect(output).toContain("npm:@some-team/ext@1.0.0");
   });
 });

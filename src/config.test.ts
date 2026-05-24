@@ -34,9 +34,9 @@ describe("loadConfig", () => {
     expect(config.imageTag).toBe("pi-agent:0.75.5");
     expect(config.projectDir).toBe(tmpDir);
     expect(config.containerDir).toBe("");
-    expect(config.extensions).toEqual([]);
-    expect(config.hasPackages).toBe(false);
+    expect(config.hasPackage).toBe(false);
     expect(config.hasSettings).toBe(false);
+    expect(config.packages).toEqual([]);
     expect(config.ports).toEqual([]);
   });
 
@@ -49,60 +49,35 @@ describe("loadConfig", () => {
     expect(config.containerDir).toBe(containerDir);
   });
 
-  it("detects extensions with index.ts", () => {
-    const extDir = path.join(tmpDir, ".pi-container", "extensions", "my-ext");
+  it("detects package directory", () => {
+    const pkgDir = path.join(tmpDir, ".pi-container", "package");
+    fs.mkdirSync(pkgDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(pkgDir, "package.json"),
+      JSON.stringify({ name: "test-pkg", pi: { extensions: ["./extensions"] } })
+    );
+    process.chdir(tmpDir);
+
+    const config = loadConfig({ homeDir: tmpDir });
+    expect(config.hasPackage).toBe(true);
+  });
+
+  it("detects package directory with extensions and themes", () => {
+    const pkgDir = path.join(tmpDir, ".pi-container", "package");
+    const extDir = path.join(pkgDir, "extensions", "my-ext");
     fs.mkdirSync(extDir, { recursive: true });
     fs.writeFileSync(path.join(extDir, "index.ts"), "export default function() {}");
-    process.chdir(tmpDir);
-
-    const config = loadConfig({ homeDir: tmpDir });
-    expect(config.extensions).toContain("my-ext");
-  });
-
-  it("detects extensions with index.js", () => {
-    const extDir = path.join(tmpDir, ".pi-container", "extensions", "js-ext");
-    fs.mkdirSync(extDir, { recursive: true });
-    fs.writeFileSync(path.join(extDir, "index.js"), "module.exports = {};");
-    process.chdir(tmpDir);
-
-    const config = loadConfig({ homeDir: tmpDir });
-    expect(config.extensions).toContain("js-ext");
-  });
-
-  it("ignores directories without index.ts or index.js", () => {
-    const extDir = path.join(tmpDir, ".pi-container", "extensions", "incomplete-ext");
-    fs.mkdirSync(extDir, { recursive: true });
-    fs.writeFileSync(path.join(extDir, "README.md"), "incomplete");
-    process.chdir(tmpDir);
-
-    const config = loadConfig({ homeDir: tmpDir });
-    expect(config.extensions).not.toContain("incomplete-ext");
-  });
-
-  it("detects packages with dependencies", () => {
-    const pkgDir = path.join(tmpDir, ".pi-container", "packages");
-    fs.mkdirSync(pkgDir, { recursive: true });
+    const themeDir = path.join(pkgDir, "themes");
+    fs.mkdirSync(themeDir, { recursive: true });
+    fs.writeFileSync(path.join(themeDir, "dark.json"), '{"name":"dark"}');
     fs.writeFileSync(
       path.join(pkgDir, "package.json"),
-      JSON.stringify({ name: "test", dependencies: { lodash: "^4.0.0" } })
+      JSON.stringify({ name: "test-pkg", pi: { extensions: ["./extensions"], themes: ["./themes"] } })
     );
     process.chdir(tmpDir);
 
     const config = loadConfig({ homeDir: tmpDir });
-    expect(config.hasPackages).toBe(true);
-  });
-
-  it("ignores packages with empty dependencies", () => {
-    const pkgDir = path.join(tmpDir, ".pi-container", "packages");
-    fs.mkdirSync(pkgDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(pkgDir, "package.json"),
-      JSON.stringify({ name: "test", dependencies: {} })
-    );
-    process.chdir(tmpDir);
-
-    const config = loadConfig({ homeDir: tmpDir });
-    expect(config.hasPackages).toBe(false);
+    expect(config.hasPackage).toBe(true);
   });
 
   it("detects settings", () => {
@@ -278,6 +253,45 @@ describe("loadConfig", () => {
     process.chdir(tmpDir);
     const config = loadConfig({ homeDir: tmpDir });
     expect(config.projectDir).toBe(tmpDir);
+  });
+
+  // ── Packages tests ──────────────────────────────────────────
+
+  describe("packages", () => {
+    it("returns empty packages by default", () => {
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir: tmpDir });
+      expect(config.packages).toEqual([]);
+    });
+
+    it("loads packages from project config", () => {
+      const containerDir = path.join(tmpDir, ".pi-container");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "config.yml"),
+        "packages:\n  - npm:@some-team/ext@1.0.0\n  - git:github.com/team/repo@v2"
+      );
+      process.chdir(tmpDir);
+
+      const config = loadConfig({ homeDir: tmpDir });
+      expect(config.packages).toEqual([
+        "npm:@some-team/ext@1.0.0",
+        "git:github.com/team/repo@v2",
+      ]);
+    });
+
+    it("returns empty packages when config has no packages field", () => {
+      const containerDir = path.join(tmpDir, ".pi-container");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "config.yml"),
+        "piVersion: '0.75.5'"
+      );
+      process.chdir(tmpDir);
+
+      const config = loadConfig({ homeDir: tmpDir });
+      expect(config.packages).toEqual([]);
+    });
   });
 
   // ── Port parsing tests ──────────────────────────────────────────

@@ -8,7 +8,6 @@
 set -eo pipefail
 
 PI_HOME="/home/pi-user/.pi/agent"
-TEAM_EXT_DIR="/opt/pi-extensions"
 HOST_UID="${HOST_UID:-1000}"
 HOST_GID="${HOST_GID:-1000}"
 
@@ -37,25 +36,24 @@ if [ ! -f "${PI_SETTINGS}" ]; then
   chown pi-user:pi-user "${PI_SETTINGS}" 2>/dev/null || true
 fi
 
-# ── Link team extensions ───────────────────────────────
-# Extensions baked into the image are symlinked into the config
-# directory so pi auto-discovers them. Won't overwrite if the
-# user has an extension with the same name.
-if [ -d "${TEAM_EXT_DIR}" ]; then
-  for ext in "${TEAM_EXT_DIR}"/*; do
-    [ -d "$ext" ] || continue
-    name=$(basename "$ext")
-    target="${PI_HOME}/extensions/${name}"
+# ── Install team package ───────────────────────────────
+# The default pi-container package (extensions, themes, etc.)
+# is baked into the image at /opt/pi-package. Install it so
+# pi discovers its resources and registers the theme.
+gosu pi-user pi install /opt/pi-package
 
-    if [ -e "$target" ] && [ ! -L "$target" ]; then
-      # Real file/dir exists — user's own extension, don't overwrite
-      true
-    else
-      # Remove stale symlink if it exists, then link fresh
-      rm -f "$target" 2>/dev/null || true
-      ln -s "$ext" "$target"
-    fi
+# ── Install additional team packages ────────────────────
+# TEAM_PACKAGES is a comma-separated list set via -e in
+# docker run, sourced from .pi-container/config.yml.
+# pi install is idempotent — already-registered packages
+# are skipped on subsequent runs.
+if [ -n "${TEAM_PACKAGES}" ]; then
+  saved_ifs="${IFS}"
+  IFS=','
+  for pkg in ${TEAM_PACKAGES}; do
+    gosu pi-user pi install "${pkg}"
   done
+  IFS="${saved_ifs}"
 fi
 
 # ── Drop privileges and run command as pi-user ──────────

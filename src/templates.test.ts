@@ -14,9 +14,9 @@ function makeConfig(overrides: Partial<PiContainerConfig> = {}): PiContainerConf
     containerDir: "/project/.pi-container",
     projectDir: "/project",
     envFile: "",
-    extensions: [],
-    hasPackages: false,
+    hasPackage: false,
     hasSettings: false,
+    packages: [],
     ports: [],
     ...overrides,
   };
@@ -45,6 +45,14 @@ describe("generateDockerfile", () => {
     expect(df).toContain("npm install -g --ignore-scripts @earendil-works/pi-coding-agent@${PI_VERSION}");
   });
 
+  it("installs team package dependencies in builder stage", () => {
+    const config = makeConfig();
+    const df = generateDockerfile(config);
+
+    expect(df).toContain("COPY package/package.json /build/package/");
+    expect(df).toContain("cd /build/package && npm install --omit=dev");
+  });
+
   it("installs runtime OS dependencies", () => {
     const config = makeConfig();
     const df = generateDockerfile(config);
@@ -67,14 +75,20 @@ describe("generateDockerfile", () => {
     expect(df).toContain("COPY --from=builder /usr/local/lib/node_modules");
   });
 
-  it("copies extensions, packages, settings, and entrypoint", () => {
+  it("copies team package source and deps", () => {
     const config = makeConfig();
     const df = generateDockerfile(config);
 
-    expect(df).toContain("COPY extensions/ /opt/pi-extensions/");
-    expect(df).toContain("COPY --from=builder /build/packages /opt/pi-packages");
-    expect(df).toContain("COPY entrypoint.sh /opt/pi/entrypoint.sh");
+    expect(df).toContain("COPY package/ /opt/pi-package/");
+    expect(df).toContain("COPY --from=builder /build/package/node_modules /opt/pi-package/node_modules");
+  });
+
+  it("copies settings and entrypoint", () => {
+    const config = makeConfig();
+    const df = generateDockerfile(config);
+
     expect(df).toContain("COPY settings/default-settings.json /opt/pi/default-settings.json");
+    expect(df).toContain("COPY entrypoint.sh /opt/pi/entrypoint.sh");
   });
 
   it("sets workspace and entrypoint", () => {
@@ -111,6 +125,14 @@ describe("generateDockerfile", () => {
     expect(argLines.length).toBe(2);
     expect(argLines[0]).toBe("ARG PI_VERSION=2.0.0");
     expect(argLines[1]).toBe("ARG PI_VERSION=2.0.0");
+  });
+
+  it("does not reference old /opt/pi-extensions/ path", () => {
+    const config = makeConfig();
+    const df = generateDockerfile(config);
+
+    expect(df).not.toContain("/opt/pi-extensions/");
+    expect(df).not.toContain("/opt/pi-packages/");
   });
 });
 
@@ -165,14 +187,19 @@ describe("generateEntrypoint", () => {
     expect(sh).toContain('if [ ! -f "${PI_SETTINGS}" ]; then');
   });
 
-  it("links team extensions respecting existing ones", () => {
+  it("installs the team package via pi install", () => {
     const config = makeConfig();
     const sh = generateEntrypoint(config);
 
-    expect(sh).toContain('"${TEAM_EXT_DIR}"');
-    expect(sh).toContain("ln -s");
-    // Should NOT overwrite user's own extensions
-    expect(sh).toContain('[ ! -L "$target" ]');
+    expect(sh).toContain("gosu pi-user pi install /opt/pi-package");
+  });
+
+  it("installs additional team packages from TEAM_PACKAGES", () => {
+    const config = makeConfig();
+    const sh = generateEntrypoint(config);
+
+    expect(sh).toContain("TEAM_PACKAGES");
+    expect(sh).toContain('for pkg in ${TEAM_PACKAGES}');
   });
 
   it("drops privileges with gosu", () => {
@@ -191,5 +218,13 @@ describe("generateEntrypoint", () => {
     expect(sh).not.toContain("${config.");
     // Should not contain TypeScript/JS artifacts
     expect(sh).not.toContain("undefined");
+  });
+
+  it("does not reference old symlink mechanism", () => {
+    const config = makeConfig();
+    const sh = generateEntrypoint(config);
+
+    expect(sh).not.toContain("TEAM_EXT_DIR");
+    expect(sh).not.toContain("ln -s");
   });
 });

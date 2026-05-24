@@ -1,6 +1,6 @@
 # pi-container
 
-Run [Pi Coding Agent](https://github.com/earendil-works/pi-coding-agent) in Docker with team-standard extensions, settings, and packages baked into the image.
+Run [Pi Coding Agent](https://github.com/earendil-works/pi-coding-agent) in Docker with team-standard packages, extensions, and settings baked into the image.
 
 ## Why
 
@@ -10,7 +10,7 @@ Running pi in Docker ensures every team member uses the same environment — sam
 
 - **CWD-respect mounts**: uses `docker run` directly, so `$(pwd)/` is always `/workspace`
 - **One install**: `npm install -g pi-container` works from any directory
-- **Project customization**: `.pi-container/` is optional — only needed for team extensions
+- **Project customization**: `.pi-container/` is optional — only needed for team customization
 
 ## Install
 
@@ -48,20 +48,23 @@ PI_VERSION=0.75.4 pi-container
 │                    Docker Container                       │
 │                                                          │
 │  ┌─────────────────────────────────────────┐             │
-│  │  /opt/pi-extensions/                    │  ◄── Baked  │
-│  │    confirm-dangerous/                   │      into   │
-│  │    workspace-guard/                     │      image  │
+│  │  /opt/pi-package/                       │  ◄── Baked  │
+│  │    ├── package.json                      │      into   │
+│  │    ├── extensions/                       │      image  │
+│  │    │   └── confirm-dangerous/           │             │
+│  │    └── themes/                          │             │
+│  │        └── github.json                  │             │
 │  └─────────────────────────────────────────┘             │
-│         │ symlinked on startup                             │
-│         ▼                                                 │
+│         │                                                  │
+│         │ pi install /opt/pi-package                      │
+│         │ (registers extensions, themes in settings)      │
+│         ▼                                                  │
 │  ┌─────────────────────────────────────────┐             │
 │  │  /home/pi-user/.pi/agent/    ◄── Host mount           │
 │  │    ├── settings.json          (shared w/ native pi)    │
 │  │    ├── auth.json              (shared w/ native pi)    │
 │  │    ├── sessions/              (shared w/ native pi)    │
 │  │    ├── extensions/                                     │
-│  │    │   └── confirm-dangerous ◄─┘ symlinked from image │
-│  │    │   └── workspace-guard   ◄─┘                     │
 │  │    ├── npm/                                            │
 │  │    └── skills/                                          │
 │  └─────────────────────────────────────────┘             │
@@ -73,7 +76,9 @@ PI_VERSION=0.75.4 pi-container
 └──────────────────────────────────────────────────────────┘
 ```
 
-- **Baked into the image**: pi binary (pinned version), team extensions, team packages, default settings
+- **Baked into the image**: pi binary (pinned version), team pi package (extensions, themes), default settings
+- **Installed on startup**: `pi install /opt/pi-package` registers the team package — extensions, themes, and skills are discovered by pi automatically
+- **Additional packages**: third-party packages (from npm, git, or local paths) are installed on startup via `pi install`
 - **Mounted from host** (persists across runs): `~/.pi/agent` (settings, auth, sessions, extensions)
 - **Mounted from CWD** (your project): always mounts `$(pwd)` as `/workspace`
 - **Port forwarding** (optional): `-p` flags expose container ports on `localhost`
@@ -98,15 +103,39 @@ Place a `.pi-container/` directory in your project root to customize:
 my-project/
 ├── .pi-container/
 │   ├── config.yml                # Optional overrides
-│   ├── extensions/
-│   │   └── confirm-dangerous/    # Team extensions (baked into image)
-│   │       └── index.ts
-│   ├── packages/
-│   │   └── package.json          # Team npm packages
+│   ├── package/                   # Team pi package (baked into image)
+│   │   ├── package.json           # Pi package manifest
+│   │   ├── extensions/
+│   │   │   └── confirm-dangerous/ # Team extensions
+│   │   │       └── index.ts
+│   │   └── themes/
+│   │       └── github.json       # Team themes
 │   └── settings/
-│       └── default-settings.json # Default pi settings
+│       └── default-settings.json # Default pi settings (theme, etc.)
 └── .env                          # API keys (gitignored)
 ```
+
+#### `.pi-container/package/package.json`
+
+The [pi package](https://github.com/earendil-works/pi-coding-agent) manifest declares what resources the package provides:
+
+```json
+{
+  "name": "my-team-defaults",
+  "version": "1.0.0",
+  "private": true,
+  "keywords": ["pi-package"],
+  "pi": {
+    "extensions": ["./extensions"],
+    "themes": ["./themes"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}
+```
+
+Pi convention directories (`extensions/`, `themes/`, `skills/`, `prompts/`) are auto-discovered. You can also add runtime dependencies to `dependencies` — they'll be installed during the Docker build.
 
 #### `.pi-container/config.yml` (optional)
 
@@ -117,7 +146,12 @@ ports:                          # Export container ports to localhost
   - 3000                        # Dev server
   - 6006                        # Storybook
   - 8080:80                     # Host 8080 → container 80
+packages:                       # Pre-install third-party pi packages
+  - npm:@some-team/safety-ext@1.0.0
+  - git:github.com/team/repo@v2
 ```
+
+Packages listed in `config.yml` are passed to `pi install` on container startup. They're installed on first run and cached in `~/.pi/agent` for subsequent runs.
 
 ### Environment variables
 
@@ -176,7 +210,8 @@ If you need to run two agents on the same project simultaneously, that's a workf
 | `~/.pi/agent/settings.json` | `/home/pi-user/.pi/agent/settings.json` | Model, thinking level, preferences |
 | `~/.pi/agent/auth.json` | `/home/pi-user/.pi/agent/auth.json` | OAuth tokens |
 | `~/.pi/agent/sessions/` | `/home/pi-user/.pi/agent/sessions/` | Conversation history |
-| `~/.pi/agent/extensions/` | `/home/pi-user/.pi/agent/extensions/` | User + team extensions |
+| `~/.pi/agent/extensions/` | `/home/pi-user/.pi/agent/extensions/` | User extensions |
+| `~/.pi/agent/npm/` | `/home/pi-user/.pi/agent/npm/` | Installed package data |
 | `~/.pi/pi-container.yml` | *(not mounted)* | User-level pi-container config |
 
 If you use pi both natively and in the container, they share the same config.
@@ -207,10 +242,9 @@ All ports bind to `127.0.0.1` (localhost only) for security. If a host port is a
 
 ## Safety
 
-The baked-in extensions provide baseline protection:
+The default package includes a safety extension:
 
 - **confirm-dangerous** — Prompts before destructive commands (`rm -rf`, `sudo`, force push, etc.), writes to system paths, and modifications to the pi config directory
-- **workspace-guard** — Adds a system prompt keeping the model inside `/workspace`
 
 ## Development
 
