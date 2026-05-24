@@ -35,6 +35,7 @@ export interface PiContainerConfig {
   configDir: string; // absolute host path (~/.pi)
   containerDir: string; // absolute path to .pi-container dir, "" if none
   projectDir: string; // absolute path — CWD, the workspace mount source
+  workspaceDir: string; // container path — e.g. /workspace or /myproject
   envFile: string; // absolute path to .env, "" if none
   hasPackage: boolean; // .pi-container/package/ exists
   hasSettings: boolean; // .pi-container/settings/default-settings.json exists
@@ -130,6 +131,7 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig {
     configDir,
     containerDir,
     projectDir,
+    workspaceDir: `/${path.basename(projectDir)}`,
     envFile,
     hasPackage,
     hasSettings,

@@ -255,6 +255,12 @@ describe("loadConfig", () => {
     expect(config.projectDir).toBe(tmpDir);
   });
 
+  it("workspaceDir is basename of projectDir with leading slash", () => {
+    process.chdir(tmpDir);
+    const config = loadConfig({ homeDir: tmpDir });
+    expect(config.workspaceDir).toBe(`/${path.basename(tmpDir)}`);
+  });
+
   // ── Packages tests ──────────────────────────────────────────
 
   describe("packages", () => {

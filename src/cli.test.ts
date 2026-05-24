@@ -103,8 +103,9 @@ describe("CLI dry-run", () => {
   it("shows docker run command with correct volume mounts", () => {
     const output = runCli("dry-run", { cwd: tmpDir });
 
-    // Should mount CWD as /workspace
-    expect(output).toContain(`${tmpDir}:/workspace:cached`);
+    // Should mount CWD as dynamic workspace dir (named after project basename)
+    const basename = path.basename(tmpDir);
+    expect(output).toContain(`${tmpDir}:/${basename}:cached`);
     // Should mount config dir under .pi-config (our test override)
     expect(output).toContain("/.pi-config:/home/pi-user/.pi");
   });

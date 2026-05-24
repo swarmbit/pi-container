@@ -109,8 +109,8 @@ export function buildDockerRunArgs(config: PiContainerConfig, command: string[])
   // No --name flag — docker generates unique names, allowing
   // multiple pi-container instances to run simultaneously.
 
-  // Mount project directory (CWD → /workspace)
-  args.push("-v", `${config.projectDir}:/workspace:cached`);
+  // Mount project directory (CWD → workspace dir named after the project)
+  args.push("-v", `${config.projectDir}:${config.workspaceDir}:cached`);
 
   // Mount pi config directory (host → container)
   // Mount the entire ~/.pi directory so the container has access
@@ -133,7 +133,10 @@ export function buildDockerRunArgs(config: PiContainerConfig, command: string[])
   }
 
   // Working directory
-  args.push("-w", "/workspace");
+  args.push("-w", config.workspaceDir);
+
+  // Pass workspace dir to container (for extensions)
+  args.push("-e", `WORKSPACE_DIR=${config.workspaceDir}`);
 
   // Host UID/GID for file permissions
   const uid = process.getuid?.() ?? 1000;

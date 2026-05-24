@@ -2,18 +2,22 @@
 // confirm-dangerous — Prompt before destructive operations
 // ============================================================
 // Blocks or confirms potentially dangerous bash commands,
-// writes outside /workspace, and modifications to the pi
+// writes outside the workspace, and modifications to the pi
 // config directory.
 //
 // Read operations (read tool) are always allowed — they are
 // never dangerous regardless of the target path.
 //
-// This extension is baked into the pi-container image as part
-// of the /opt/pi-package pi package.
+// The workspace directory is determined by the WORKSPACE_DIR
+// environment variable, set by pi-container based on the
+// project directory name.
 // ============================================================
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { isToolCallEventType } from "@earendil-works/pi-coding-agent";
+
+// Workspace directory — set by pi-container from the CWD basename
+const WORKSPACE_DIR = process.env.WORKSPACE_DIR || "/workspace";
 
 // Patterns that indicate a dangerous bash command
 const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; description: string }> = [
@@ -59,16 +63,16 @@ export default function (pi: ExtensionAPI) {
       }
     }
 
-    // ── Write/edit outside /workspace ───────────────────────
+    // ── Write/edit outside workspace ──────────────────────
     if (isToolCallEventType("write", event)) {
       const filePath: string = event.input.path ?? "";
       if (isOutsideWorkspace(filePath) && !isPiConfigDir(filePath)) {
         const ok = await ctx.ui.confirm(
           "Write Outside Workspace",
-          `Attempting to write to:\n\n${filePath}\n\nThis is outside /workspace. Allow?`
+          `Attempting to write to:\n\n${filePath}\n\nThis is outside ${WORKSPACE_DIR}. Allow?`
         );
         if (!ok) {
-          return { block: true, reason: "Blocked: write outside /workspace" };
+          return { block: true, reason: `Blocked: write outside ${WORKSPACE_DIR}` };
         }
       }
     }
@@ -78,10 +82,10 @@ export default function (pi: ExtensionAPI) {
       if (isOutsideWorkspace(filePath) && !isPiConfigDir(filePath)) {
         const ok = await ctx.ui.confirm(
           "Edit Outside Workspace",
-          `Attempting to edit:\n\n${filePath}\n\nThis is outside /workspace. Allow?`
+          `Attempting to edit:\n\n${filePath}\n\nThis is outside ${WORKSPACE_DIR}. Allow?`
         );
         if (!ok) {
-          return { block: true, reason: "Blocked: edit outside /workspace" };
+          return { block: true, reason: `Blocked: edit outside ${WORKSPACE_DIR}` };
         }
       }
     }
@@ -90,10 +94,10 @@ export default function (pi: ExtensionAPI) {
 
 // ── Helper functions (exported for testing) ──────────────────
 
-export function isOutsideWorkspace(filePath: string): boolean {
-  // Resolve relative paths
-  const normalized = filePath.startsWith("/") ? filePath : `/workspace/${filePath}`;
-  return !normalized.startsWith("/workspace/") && normalized !== "/workspace";
+export function isOutsideWorkspace(filePath: string, workspaceDir: string = WORKSPACE_DIR): boolean {
+  // Resolve relative paths against the workspace directory
+  const normalized = filePath.startsWith("/") ? filePath : `${workspaceDir}/${filePath}`;
+  return !normalized.startsWith(`${workspaceDir}/`) && normalized !== workspaceDir;
 }
 
 export function isPiConfigDir(filePath: string): boolean {
@@ -101,4 +105,4 @@ export function isPiConfigDir(filePath: string): boolean {
   return filePath.startsWith("/home/pi-user/.pi/");
 }
 
-export { DANGEROUS_PATTERNS };
+export { DANGEROUS_PATTERNS, WORKSPACE_DIR };

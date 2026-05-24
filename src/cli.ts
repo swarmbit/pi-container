@@ -221,6 +221,7 @@ function printDryRun(config: PiContainerConfig, piArgs: string[]): void {
   console.log(`  piVersion:      ${config.piVersion}`);
   console.log(`  imageTag:       ${config.imageTag}`);
   console.log(`  projectDir:     ${config.projectDir}`);
+  console.log(`  workspaceDir:   ${config.workspaceDir}`);
   console.log(`  configDir:      ${config.configDir}`);
   console.log(`  envFile:        ${config.envFile || "(none)"}`);
   console.log(`  containerDir:   ${config.containerDir || "(none)"}`);

@@ -8,7 +8,7 @@ Running pi in Docker ensures every team member uses the same environment — sam
 
 `pi-container` makes this simple:
 
-- **CWD-respect mounts**: uses `docker run` directly, so `$(pwd)/` is always `/workspace`
+- **CWD-respect mounts**: uses `docker run` directly, so `$(pwd)/` is always mounted as `/<dirname>`
 - **One install**: `npm install -g pi-container` works from any directory
 - **Project customization**: `.pi-container/` is optional — only needed for team customization
 
@@ -71,7 +71,7 @@ PI_VERSION=0.75.4 pi-container
 │  └─────────────────────────────────────────┘             │
 │                                                          │
 │  ┌─────────────────────────────────────────┐             │
-│  │  /workspace/                   ◄── CWD mount           │
+│  │  /<project-dir>/               ◄── CWD mount           │
 │  │    (your project directory)             │             │
 │  └─────────────────────────────────────────┘             │
 └──────────────────────────────────────────────────────────┘
@@ -81,7 +81,7 @@ PI_VERSION=0.75.4 pi-container
 - **Installed on startup**: `pi install /opt/pi-package` registers the team package — extensions, themes, and skills are discovered by pi automatically
 - **Additional packages**: third-party packages (from npm, git, or local paths) are installed on startup via `pi install`
 - **Mounted from host** (persists across runs): `~/.pi` (settings, auth, sessions, extensions)
-- **Mounted from CWD** (your project): always mounts `$(pwd)` as `/workspace`
+- **Mounted from CWD** (your project): mounts `$(pwd)` as `/<dirname>` (e.g., `/myproject`)
 - **Port forwarding** (optional): `-p` flags expose container ports on `localhost`
 
 Each invocation creates a fresh container. Multiple instances can run simultaneously (no `--name` collision).
@@ -207,7 +207,7 @@ If you need to run two agents on the same project simultaneously, that's a workf
 
 | Host path | Container path | Contents |
 |-----------|---------------|----------|
-| `$(pwd)` | `/workspace` | Your project (CWD mount) |
+| `$(pwd)` | `/<basename>` | Your project (CWD mount, named after directory) |
 | `~/.pi` | `/home/pi-user/.pi` | Full pi config (mounted) |
 | `~/.pi/agent/settings.json` | `/home/pi-user/.pi/agent/settings.json` | Model, thinking level, preferences |
 | `~/.pi/agent/auth.json` | `/home/pi-user/.pi/agent/auth.json` | OAuth tokens |

@@ -17,6 +17,7 @@ function makeConfig(overrides: Partial<PiContainerConfig> = {}): PiContainerConf
     configDir: "/home/user/.pi",
     containerDir: "",
     projectDir: "/project",
+    workspaceDir: "/project",
     envFile: "",
     hasPackage: false,
     hasSettings: false,
@@ -35,13 +36,14 @@ describe("buildDockerRunArgs", () => {
     expect(args[1]).toBe("--rm");
   });
 
-  it("mounts projectDir as /workspace", () => {
-    const config = makeConfig({ projectDir: "/my/project" });
+  it("mounts projectDir as dynamic workspace dir", () => {
+    const config = makeConfig();
     const args = buildDockerRunArgs(config, ["pi"]);
 
     const vIdx = args.indexOf("-v");
     expect(vIdx).toBeGreaterThan(-1);
-    expect(args[vIdx + 1]).toBe("/my/project:/workspace:cached");
+    // Default projectDir is "/project", so workspaceDir is "/project"
+    expect(args[vIdx + 1]).toBe("/project:/project:cached");
   });
 
   it("mounts configDir as pi config", () => {
@@ -54,24 +56,37 @@ describe("buildDockerRunArgs", () => {
     expect(volArgs).toContain("/home/user/.pi:/home/pi-user/.pi");
   });
 
-  it("sets working directory to /workspace", () => {
+  it("sets working directory to workspace dir", () => {
     const config = makeConfig();
     const args = buildDockerRunArgs(config, ["pi"]);
 
     const wIdx = args.indexOf("-w");
     expect(wIdx).toBeGreaterThan(-1);
-    expect(args[wIdx + 1]).toBe("/workspace");
+    expect(args[wIdx + 1]).toBe("/project");
   });
 
-  it("passes HOST_UID and HOST_GID", () => {
+  it("uses dynamic workspace dir based on project basename", () => {
+    const config = makeConfig({ projectDir: "/home/user/my-app", workspaceDir: "/my-app" });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const vIdx = args.indexOf("-v");
+    expect(args[vIdx + 1]).toBe("/home/user/my-app:/my-app:cached");
+
+    const wIdx = args.indexOf("-w");
+    expect(args[wIdx + 1]).toBe("/my-app");
+  });
+
+  it("passes HOST_UID, HOST_GID, and WORKSPACE_DIR env vars", () => {
     const config = makeConfig();
     const args = buildDockerRunArgs(config, ["pi"]);
 
     expect(args).toContain("-e");
     const uidEntry = args.find((a) => a.startsWith("HOST_UID="));
     const gidEntry = args.find((a) => a.startsWith("HOST_GID="));
+    const workspaceEntry = args.find((a) => a.startsWith("WORKSPACE_DIR="));
     expect(uidEntry).toBeDefined();
     expect(gidEntry).toBeDefined();
+    expect(workspaceEntry).toBe("WORKSPACE_DIR=/project");
   });
 
   it("includes --env-file when .env exists", () => {

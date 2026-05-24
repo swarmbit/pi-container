@@ -19,28 +19,28 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
   default: {},
 }));
 
-import { isOutsideWorkspace, isPiConfigDir, DANGEROUS_PATTERNS } from "./index";
+import { isOutsideWorkspace, isPiConfigDir, DANGEROUS_PATTERNS, WORKSPACE_DIR } from "./index";
 
 // ── isOutsideWorkspace ──────────────────────────────────────
 
 describe("isOutsideWorkspace", () => {
-  it("allows paths inside /workspace", () => {
+  it("allows paths inside workspace (default /workspace)", () => {
     expect(isOutsideWorkspace("/workspace/src/index.ts")).toBe(false);
     expect(isOutsideWorkspace("/workspace/.env")).toBe(false);
     expect(isOutsideWorkspace("/workspace/deep/nested/path.txt")).toBe(false);
   });
 
-  it("allows /workspace itself", () => {
+  it("allows /workspace itself (default)", () => {
     expect(isOutsideWorkspace("/workspace")).toBe(false);
   });
 
-  it("allows relative paths (resolved to /workspace)", () => {
+  it("allows relative paths (resolved to /workspace by default)", () => {
     expect(isOutsideWorkspace("src/index.ts")).toBe(false);
     expect(isOutsideWorkspace(".env")).toBe(false);
     expect(isOutsideWorkspace("deep/nested/path.txt")).toBe(false);
   });
 
-  it("blocks paths outside /workspace", () => {
+  it("blocks paths outside /workspace (default)", () => {
     expect(isOutsideWorkspace("/etc/passwd")).toBe(true);
     expect(isOutsideWorkspace("/usr/bin/node")).toBe(true);
     expect(isOutsideWorkspace("/root/.ssh/id_rsa")).toBe(true);
@@ -50,6 +50,14 @@ describe("isOutsideWorkspace", () => {
   it("blocks paths that start with /workspace but aren't under it", () => {
     expect(isOutsideWorkspace("/workspace-other/file")).toBe(true);
     expect(isOutsideWorkspace("/workspace2/file")).toBe(true);
+  });
+
+  it("respects custom workspace directory", () => {
+    expect(isOutsideWorkspace("/myproject/src/index.ts", "/myproject")).toBe(false);
+    expect(isOutsideWorkspace("/myproject", "/myproject")).toBe(false);
+    expect(isOutsideWorkspace("/etc/passwd", "/myproject")).toBe(true);
+    expect(isOutsideWorkspace("/workspace/file", "/myproject")).toBe(true);
+    expect(isOutsideWorkspace("src/index.ts", "/myproject")).toBe(false);
   });
 });
 
@@ -63,7 +71,7 @@ describe("isPiConfigDir", () => {
     expect(isPiConfigDir("/home/pi-user/.pi/agent/auth.json")).toBe(true);
   });
 
-  it("allows paths under /home/pi-user/.pi/ (the full mount point)", () => {
+  it("allows paths under /home/pi-user/.pi/ (full mount point)", () => {
     expect(isPiConfigDir("/home/pi-user/.pi/agent")).toBe(true);
     expect(isPiConfigDir("/home/pi-user/.pi/pi-container.yml")).toBe(true);
     expect(isPiConfigDir("/home/pi-user/.pi/agent/extensions/my-ext/index.ts")).toBe(true);
@@ -74,6 +82,15 @@ describe("isPiConfigDir", () => {
     expect(isPiConfigDir("/workspace/.env")).toBe(false);
     expect(isPiConfigDir("/home/pi-user/.bashrc")).toBe(false);
     expect(isPiConfigDir("/home/pi-user/.ssh/config")).toBe(false);
+  });
+});
+
+// ── WORKSPACE_DIR constant ──────────────────────────────────
+
+describe("WORKSPACE_DIR", () => {
+  it("defaults to /workspace when WORKSPACE_DIR env is not set", () => {
+    // In test environment, WORKSPACE_DIR is not set, so it defaults
+    expect(WORKSPACE_DIR).toBe("/workspace");
   });
 });
 
@@ -236,6 +253,16 @@ describe("write protection logic", () => {
   it("blocks writes that are outside /workspace and not in pi config", () => {
     expect(isOutsideWorkspace("/etc/passwd")).toBe(true);
     expect(isPiConfigDir("/etc/passwd")).toBe(false);
+  });
+
+  it("allows writes inside custom workspace dir", () => {
+    expect(isOutsideWorkspace("/myproject/src/index.ts", "/myproject")).toBe(false);
+    expect(isOutsideWorkspace("/myproject", "/myproject")).toBe(false);
+  });
+
+  it("blocks writes outside custom workspace dir", () => {
+    expect(isOutsideWorkspace("/etc/passwd", "/myproject")).toBe(true);
+    expect(isOutsideWorkspace("/workspace/file", "/myproject")).toBe(true);
   });
 });
 

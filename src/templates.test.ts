@@ -13,6 +13,7 @@ function makeConfig(overrides: Partial<PiContainerConfig> = {}): PiContainerConf
     configDir: "/home/user/.pi",
     containerDir: "/project/.pi-container",
     projectDir: "/project",
+    workspaceDir: "/project",
     envFile: "",
     hasPackage: false,
     hasSettings: false,
