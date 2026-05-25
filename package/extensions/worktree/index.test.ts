@@ -188,7 +188,7 @@ describe("Registry", () => {
     const data = {
       worktrees: {
         "abc123_feat": {
-          path: "/workdir/pi-container/worktrees/abc123_feat",
+          path: ".pi/worktrees/abc123_feat",
           sessionFile: "/sessions/x.jsonl",
           createdAt: "2025-01-01T00:00:00.000Z",
           baseRef: "main",
@@ -213,7 +213,7 @@ describe("Registry", () => {
     const registry = {
       worktrees: {
         "abc123_feat": {
-          path: "/workdir/worktrees/abc123_feat",
+          path: ".pi/worktrees/abc123_feat",
           sessionFile: "/sessions/x.jsonl",
           createdAt: "2025-01-01T00:00:00.000Z",
           baseRef: "main",
@@ -222,7 +222,7 @@ describe("Registry", () => {
     };
     writeRegistry(registry);
     const written = JSON.parse(mockFsWriteFileSync.mock.calls[0][1]);
-    expect(written.worktrees["abc123_feat"].path).toBe("/workdir/worktrees/abc123_feat");
+    expect(written.worktrees["abc123_feat"].path).toBe(".pi/worktrees/abc123_feat");
     expect(written.worktrees["abc123_feat"].sessionFile).toBe("/sessions/x.jsonl");
     expect(written.worktrees["abc123_feat"].baseRef).toBe("main");
   });
@@ -231,7 +231,7 @@ describe("Registry", () => {
     const registry = {
       worktrees: {
         "abc123_feat": {
-          path: "/workdir/worktrees/abc123_feat",
+          path: ".pi/worktrees/abc123_feat",
           sessionFile: "/sessions/x.jsonl",
           createdAt: "2025-01-01T00:00:00.000Z",
           baseRef: "main",
@@ -252,13 +252,13 @@ describe("Registry", () => {
     const registry = {
       worktrees: {
         "abc123_feat-a": {
-          path: "/workdir/worktrees/abc123_feat-a",
+          path: ".pi/worktrees/abc123_feat-a",
           sessionFile: "/sessions/a.jsonl",
           createdAt: "2025-01-01T00:00:00.000Z",
           baseRef: "main",
         },
         "def456_feat-b": {
-          path: "/workdir/worktrees/def456_feat-b",
+          path: ".pi/worktrees/def456_feat-b",
           sessionFile: "/sessions/b.jsonl",
           createdAt: "2025-01-02T00:00:00.000Z",
           baseRef: "develop",
@@ -278,7 +278,7 @@ describe("Registry", () => {
     const registry = {
       worktrees: {
         "abc123_feat": {
-          path: "/workdir/worktrees/abc123_feat",
+          path: ".pi/worktrees/abc123_feat",
           sessionFile: "/sessions/x.jsonl",
           createdAt: "2025-01-01T00:00:00.000Z",
           baseRef: "main",
@@ -321,7 +321,7 @@ describe("listWorktrees", () => {
     const data = {
       worktrees: {
         "abc123_feat-a": {
-          path: "/workdir/worktrees/abc123_feat-a",
+          path: ".pi/worktrees/abc123_feat-a",
           sessionFile: "/sessions/a.jsonl",
           createdAt: "",
           baseRef: "main",
@@ -341,13 +341,13 @@ describe("listWorktrees", () => {
     const data = {
       worktrees: {
         "abc123_feat-a": {
-          path: "/workdir/worktrees/abc123_feat-a",
+          path: ".pi/worktrees/abc123_feat-a",
           sessionFile: "/sessions/a.jsonl",
           createdAt: "",
           baseRef: "main",
         },
         "def456_feat-b": {
-          path: "/workdir/worktrees/def456_feat-b",
+          path: ".pi/worktrees/def456_feat-b",
           sessionFile: "/sessions/b.jsonl",
           createdAt: "",
           baseRef: "develop",
@@ -370,7 +370,7 @@ describe("listWorktrees", () => {
     const data = {
       worktrees: {
         "abc123_feat-a": {
-          path: "/workdir/worktrees/abc123_feat-a",
+          path: ".pi/worktrees/abc123_feat-a",
           sessionFile: "/sessions/a.jsonl",
           createdAt: "",
           baseRef: "main",
@@ -390,7 +390,7 @@ describe("listWorktrees", () => {
     const data = {
       worktrees: {
         "abc123_feat-a": {
-          path: "/workdir/worktrees/abc123_feat-a",
+          path: ".pi/worktrees/abc123_feat-a",
           sessionFile: "/sessions/a.jsonl",
           createdAt: "",
           baseRef: "main",
@@ -537,7 +537,7 @@ describe("createWorktree", () => {
       expect(result.worktreeName).toBe("abc123_feature");
       expect(SessionManager.forkFrom).toHaveBeenCalledWith(
         "/sessions/current.jsonl",
-        expect.stringContaining("/workdir/pi-container/worktrees/abc123_feature")
+        expect.stringContaining(".pi/worktrees/abc123_feature")
       );
       expect(mockAppendSessionInfo).toHaveBeenCalledWith("abc123_feature");
       expect(mockAppendCustomEntry).toHaveBeenCalled();
@@ -557,7 +557,7 @@ describe("createWorktree", () => {
       expect(result.error).toBeUndefined();
       expect(result.forked).toBe(false);
       expect(SessionManager.create).toHaveBeenCalledWith(
-        expect.stringContaining("/workdir/pi-container/worktrees/abc123_feature")
+        expect.stringContaining(".pi/worktrees/abc123_feature")
       );
     });
 
@@ -596,7 +596,7 @@ describe("createWorktree", () => {
         "worktree",
         expect.objectContaining({
           worktreeName: "abc123_feature",
-          worktreePath: expect.stringContaining("/workdir/pi-container/worktrees/abc123_feature"),
+          worktreePath: expect.stringContaining(".pi/worktrees/abc123_feature"),
           baseRef: expect.any(String),
           createdAt: expect.any(String),
           forked: true,
@@ -650,7 +650,7 @@ describe("deleteWorktree", () => {
       JSON.stringify({
         worktrees: {
           abc123_feat: {
-            path: "/workdir/worktrees/abc123_feat",
+            path: ".pi/worktrees/abc123_feat",
             sessionFile,
             createdAt: "",
             baseRef: "main",
@@ -678,7 +678,7 @@ describe("deleteWorktree", () => {
       JSON.stringify({
         worktrees: {
           abc123_feat: {
-            path: "/workdir/worktrees/abc123_feat",
+            path: ".pi/worktrees/abc123_feat",
             sessionFile: deletedSession,
             createdAt: "",
             baseRef: "main",
@@ -698,7 +698,7 @@ describe("deleteWorktree", () => {
       "worktree",
       "remove",
       "--force",
-      "/workdir/worktrees/abc123_feat",
+      ".pi/worktrees/abc123_feat",
     ]);
     expect(mockFsUnlinkSync).toHaveBeenCalledWith(deletedSession);
   });
@@ -711,7 +711,7 @@ describe("deleteWorktree", () => {
       JSON.stringify({
         worktrees: {
           abc123_feat: {
-            path: "/workdir/worktrees/abc123_feat",
+            path: ".pi/worktrees/abc123_feat",
             sessionFile,
             createdAt: "",
             baseRef: "main",
@@ -747,7 +747,7 @@ describe("deleteWorktree", () => {
       JSON.stringify({
         worktrees: {
           abc123_feat: {
-            path: "/workdir/worktrees/abc123_feat",
+            path: ".pi/worktrees/abc123_feat",
             sessionFile: deletedSession,
             createdAt: "",
             baseRef: "main",
@@ -758,7 +758,7 @@ describe("deleteWorktree", () => {
 
     // existsSync: return false only for the worktree path itself
     mockFsExistsSync.mockImplementation((p: string) => {
-      if (p === "/workdir/worktrees/abc123_feat") return false; // missing
+      if (p === ".pi/worktrees/abc123_feat") return false; // missing
       return true; // everything else (including session file) exists
     });
 
@@ -783,7 +783,7 @@ describe("deleteWorktree", () => {
       JSON.stringify({
         worktrees: {
           abc123_feat: {
-            path: "/workdir/worktrees/abc123_feat",
+            path: ".pi/worktrees/abc123_feat",
             sessionFile,
             createdAt: "",
             baseRef: "main",
@@ -816,7 +816,7 @@ describe("deleteWorktree", () => {
     const initialRegistry = {
       worktrees: {
         abc123_feat: {
-          path: "/workdir/worktrees/abc123_feat",
+          path: ".pi/worktrees/abc123_feat",
           sessionFile: deletedSession,
           createdAt: "",
           baseRef: "main",
@@ -872,7 +872,7 @@ describe("edge cases", () => {
       JSON.stringify({
         worktrees: {
           abc123_feat: {
-            path: "/workdir/worktrees/abc123_feat",
+            path: ".pi/worktrees/abc123_feat",
             sessionFile: deletedSession,
             createdAt: "",
             baseRef: "main",
@@ -897,7 +897,7 @@ describe("edge cases", () => {
     expect(mockFsUnlinkSync).not.toHaveBeenCalled();
   });
 
-  it("createWorktree uses custom base ref when provided", async () => {
+  it("createWorktree creates branch from current HEAD", async () => {
     const mockSm = mockSessionManager("/sessions/new.jsonl");
     mockSessionForkFrom.mockReturnValue(mockSm);
     mockFsExistsSync.mockReturnValue(false);
@@ -906,15 +906,15 @@ describe("edge cases", () => {
     const pi = mockPi();
     const ctx = mockCtx("/sessions/current.jsonl");
 
-    // getShortHash is called with the base ref
-    mockExecSync.mockReturnValueOnce("def456"); // getShortHash("develop")
+    // getShortHash always called with HEAD; getCurrentBranch for baseRef
+    mockExecSync.mockReturnValueOnce("abc123"); // getShortHash("HEAD")
 
-    const result = await createWorktree(pi, ctx, "feature", "develop");
+    const result = await createWorktree(pi, ctx, "feature");
 
     expect(mockExecSync).toHaveBeenCalledWith(
-      "git rev-parse --short develop",
+      "git rev-parse --short HEAD",
       expect.any(Object)
     );
-    expect(result.worktreeName).toBe("def456_feature");
+    expect(result.worktreeName).toBe("abc123_feature");
   });
 });
