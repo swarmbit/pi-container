@@ -2,7 +2,7 @@
 // worktree — Git worktree management extension
 // ============================================================
 // Supports creating, listing, and deleting git worktrees.
-// Each worktree lives under /workdir/pi-container/worktrees/
+// Each worktree lives under .pi/worktrees/
 // and has a dedicated pi session rooted at the worktree directory.
 //
 // Create behavior:
@@ -18,7 +18,7 @@
 //     to another session first.
 //
 // Commands:
-//   /worktree-create <name> [base]  Create a new worktree + session
+//   /worktree-create <name>.        Create a new worktree + session
 //   /worktree-delete                Interactively select and delete a worktree
 //   /worktree-list                  List all managed worktrees
 //
@@ -28,8 +28,8 @@
 //   worktree_list    - List all registered worktrees
 //
 // Registry:
-//   /workdir/pi-container/worktrees/.registry.json
-//   Maps worktree name -> { path, sessionFile, createdAt, branch }
+//   /workdir/.pi/worktrees/.registry.json
+//   Maps worktree name -> { path, sessionFile, createdAt, baseRef }
 //
 // What if we delete the worktree but not the session?
 //   The session file still exists but its cwd (the worktree directory)
@@ -47,14 +47,14 @@ import { execSync } from "node:child_process";
 
 // ── Constants ────────────────────────────────────────────────
 
-export const WORKTREES_DIR = "/workdir/pi-container/worktrees";
+export const WORKTREES_DIR = ".pi/worktrees";
 export const REGISTRY_FILE = path.join(WORKTREES_DIR, ".registry.json");
 
 export interface WorktreeEntry {
   path: string;
   sessionFile: string;
   createdAt: string;
-  branch: string;
+  baseRef: string;
 }
 
 export interface Registry {
@@ -114,10 +114,9 @@ export interface CreateResult {
 export async function createWorktree(
   pi: ExtensionAPI,
   ctx: any,
-  name: string,
-  base?: string
+  name: string
 ): Promise<CreateResult> {
-  const shortHash = getShortHash(base ?? "HEAD");
+  const shortHash = getShortHash("HEAD");
   const worktreeName = buildWorktreeName(shortHash, name);
   const worktreePath = path.join(WORKTREES_DIR, worktreeName);
 
@@ -132,12 +131,22 @@ export async function createWorktree(
     return { error: `Worktree "${worktreeName}" already registered.` };
   }
 
-  // Determine the base ref (branch, tag, or commit)
-  const baseRef = base ?? getCurrentBranch();
+  // 1. Create the git worktree with a new branch named after the worktree.
+  //    Using -b creates a fresh branch so there's no "already checked out"
+  //    conflict with the base ref.
+  const baseRef = getCurrentBranch();
+  const addResult = await pi.exec("git", [
+    "worktree", "add", "-b", worktreeName, worktreePath, baseRef,
+  ]);
 
-  // 1. Create the git worktree
-  const addResult = await pi.exec("git", ["worktree", "add", worktreePath, baseRef]);
   if (addResult.code !== 0) {
+    const stderr = (addResult.stderr || "").toLowerCase();
+    if (stderr.includes("already exists")) {
+      return {
+        error: `A branch named "${worktreeName}" already exists. ` +
+          `Use a different worktree name.`,
+      };
+    }
     return { error: `git worktree add failed: ${addResult.stderr || addResult.stdout}` };
   }
 
@@ -148,9 +157,20 @@ export async function createWorktree(
 
   try {
     if (currentSessionFile) {
-      // Active session exists → fork it into the worktree
-      newSm = SessionManager.forkFrom(currentSessionFile, worktreePath);
-      forked = true;
+      // Active session exists → try to fork it into the worktree.
+      // If the session file is empty/invalid (e.g. freshly started pi
+      // with no messages yet), fall back to creating a fresh session.
+      try {
+        newSm = SessionManager.forkFrom(currentSessionFile, worktreePath);
+        forked = true;
+      } catch (forkErr: any) {
+        const msg = (forkErr.message ?? "").toLowerCase();
+        if (msg.includes("empty") || msg.includes("invalid")) {
+          newSm = SessionManager.create(worktreePath);
+        } else {
+          throw forkErr;
+        }
+      }
     } else {
       // No active session (ephemeral) → create a fresh session
       newSm = SessionManager.create(worktreePath);
@@ -161,9 +181,9 @@ export async function createWorktree(
 
     // Store worktree metadata in the session for context
     newSm.appendCustomEntry("worktree", {
-      worktreeName,
-      worktreePath,
-      branch: baseRef,
+      worktreeName: worktreeName,
+      worktreePath: worktreePath,
+      baseRef,
       createdAt: new Date().toISOString(),
       forked,
     });
@@ -180,7 +200,7 @@ export async function createWorktree(
       path: worktreePath,
       sessionFile,
       createdAt: new Date().toISOString(),
-      branch: baseRef,
+      baseRef,
     };
     writeRegistry(registry);
 
@@ -191,7 +211,12 @@ export async function createWorktree(
       },
     });
 
-    return { worktreeName, worktreePath, sessionFile, forked };
+    return {
+      worktreeName: worktreeName,
+      worktreePath: worktreePath,
+      sessionFile,
+      forked,
+    };
   } catch (err: any) {
     // Roll back the git worktree on failure
     await pi.exec("git", ["worktree", "remove", "--force", worktreePath]);
@@ -291,7 +316,7 @@ export function listWorktrees(ctx: any): string[] {
   for (const [name, entry] of Object.entries(registry.worktrees)) {
     const marker = entry.sessionFile === currentFile ? " ← current" : "";
     const missing = !fs.existsSync(entry.path) ? " [directory missing]" : "";
-    lines.push(`${name}  branch=${entry.branch}${marker}${missing}`);
+    lines.push(`${name}  base=${entry.baseRef}${marker}${missing}`);
   }
 
   return lines;
@@ -309,14 +334,13 @@ export default function (pi: ExtensionAPI) {
     handler: async (args, ctx) => {
       const parts = (args ?? "").trim().split(/\s+/);
       const name = parts[0];
-      const base = parts[1] || undefined;
 
       if (!name) {
-        ctx.ui.notify("Usage: /worktree-create <name> [base]", "error");
+        ctx.ui.notify("Usage: /worktree-create <name>", "error");
         return;
       }
 
-      const result = await createWorktree(pi, ctx, name, base);
+      const result = await createWorktree(pi, ctx, name);
       if (result.error) {
         ctx.ui.notify(result.error, "error");
       } else {
@@ -344,7 +368,7 @@ export default function (pi: ExtensionAPI) {
         "Select worktree to delete:",
         names.map((n) => {
           const e = registry.worktrees[n];
-          return `${n}  (${e.branch})`;
+          return `${n}  (${e.baseRef})`;
         })
       );
 
@@ -386,7 +410,7 @@ export default function (pi: ExtensionAPI) {
     name: "worktree_create",
     label: "Create Worktree",
     description:
-      "Create a new git worktree at /workdir/pi-container/worktrees/<hash>_<name> " +
+      "Create a new git worktree at .pi/worktrees/<hash>_<name> " +
       "and set up a dedicated pi session rooted at the worktree. " +
       "If a session is active, it is forked (full history copied); " +
       "otherwise a fresh session is created.",
@@ -408,7 +432,7 @@ export default function (pi: ExtensionAPI) {
       ),
     }),
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await createWorktree(pi, ctx, params.name, params.base);
+      const result = await createWorktree(pi, ctx, params.name);
       if (result.error) {
         throw new Error(result.error);
       }

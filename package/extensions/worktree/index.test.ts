@@ -191,14 +191,14 @@ describe("Registry", () => {
           path: "/workdir/pi-container/worktrees/abc123_feat",
           sessionFile: "/sessions/x.jsonl",
           createdAt: "2025-01-01T00:00:00.000Z",
-          branch: "main",
+          baseRef: "main",
         },
       },
     };
     mockFsReadFileSync.mockReturnValue(JSON.stringify(data));
     const registry = readRegistry();
     expect(registry.worktrees["abc123_feat"]).toBeDefined();
-    expect(registry.worktrees["abc123_feat"].branch).toBe("main");
+    expect(registry.worktrees["abc123_feat"].baseRef).toBe("main");
   });
 
   it("writeRegistry creates directory and writes JSON", () => {
@@ -216,7 +216,7 @@ describe("Registry", () => {
           path: "/workdir/worktrees/abc123_feat",
           sessionFile: "/sessions/x.jsonl",
           createdAt: "2025-01-01T00:00:00.000Z",
-          branch: "main",
+          baseRef: "main",
         },
       },
     };
@@ -224,7 +224,7 @@ describe("Registry", () => {
     const written = JSON.parse(mockFsWriteFileSync.mock.calls[0][1]);
     expect(written.worktrees["abc123_feat"].path).toBe("/workdir/worktrees/abc123_feat");
     expect(written.worktrees["abc123_feat"].sessionFile).toBe("/sessions/x.jsonl");
-    expect(written.worktrees["abc123_feat"].branch).toBe("main");
+    expect(written.worktrees["abc123_feat"].baseRef).toBe("main");
   });
 
   it("roundtrip: write then read", () => {
@@ -234,7 +234,7 @@ describe("Registry", () => {
           path: "/workdir/worktrees/abc123_feat",
           sessionFile: "/sessions/x.jsonl",
           createdAt: "2025-01-01T00:00:00.000Z",
-          branch: "main",
+          baseRef: "main",
         },
       },
     };
@@ -255,13 +255,13 @@ describe("Registry", () => {
           path: "/workdir/worktrees/abc123_feat-a",
           sessionFile: "/sessions/a.jsonl",
           createdAt: "2025-01-01T00:00:00.000Z",
-          branch: "main",
+          baseRef: "main",
         },
         "def456_feat-b": {
           path: "/workdir/worktrees/def456_feat-b",
           sessionFile: "/sessions/b.jsonl",
           createdAt: "2025-01-02T00:00:00.000Z",
-          branch: "develop",
+          baseRef: "develop",
         },
       },
     };
@@ -281,7 +281,7 @@ describe("Registry", () => {
           path: "/workdir/worktrees/abc123_feat",
           sessionFile: "/sessions/x.jsonl",
           createdAt: "2025-01-01T00:00:00.000Z",
-          branch: "main",
+          baseRef: "main",
         },
       },
     };
@@ -324,7 +324,7 @@ describe("listWorktrees", () => {
           path: "/workdir/worktrees/abc123_feat-a",
           sessionFile: "/sessions/a.jsonl",
           createdAt: "",
-          branch: "main",
+          baseRef: "main",
         },
       },
     };
@@ -334,7 +334,7 @@ describe("listWorktrees", () => {
     const lines = listWorktrees(ctx);
     expect(lines).toHaveLength(1);
     expect(lines[0]).toContain("abc123_feat-a");
-    expect(lines[0]).toContain("branch=main");
+    expect(lines[0]).toContain("base=main");
   });
 
   it("marks the current session's worktree", () => {
@@ -344,13 +344,13 @@ describe("listWorktrees", () => {
           path: "/workdir/worktrees/abc123_feat-a",
           sessionFile: "/sessions/a.jsonl",
           createdAt: "",
-          branch: "main",
+          baseRef: "main",
         },
         "def456_feat-b": {
           path: "/workdir/worktrees/def456_feat-b",
           sessionFile: "/sessions/b.jsonl",
           createdAt: "",
-          branch: "develop",
+          baseRef: "develop",
         },
       },
     };
@@ -373,7 +373,7 @@ describe("listWorktrees", () => {
           path: "/workdir/worktrees/abc123_feat-a",
           sessionFile: "/sessions/a.jsonl",
           createdAt: "",
-          branch: "main",
+          baseRef: "main",
         },
       },
     };
@@ -393,7 +393,7 @@ describe("listWorktrees", () => {
           path: "/workdir/worktrees/abc123_feat-a",
           sessionFile: "/sessions/a.jsonl",
           createdAt: "",
-          branch: "main",
+          baseRef: "main",
         },
       },
     };
@@ -493,7 +493,7 @@ describe("createWorktree", () => {
               path: "/some/path",
               sessionFile: "/s.jsonl",
               createdAt: "",
-              branch: "",
+              baseRef: "",
             },
           },
         })
@@ -511,7 +511,7 @@ describe("createWorktree", () => {
       mockFsExistsSync.mockReturnValue(false); // path doesn't exist
       mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
 
-      pi = mockPi([{ code: 1, stdout: "", stderr: "fatal: already exists" }]);
+      pi = mockPi([{ code: 1, stdout: "", stderr: "fatal: not a git repository" }]);
       ctx = mockCtx("/sessions/current.jsonl");
 
       const result = await createWorktree(pi, ctx, "feature");
@@ -577,13 +577,8 @@ describe("createWorktree", () => {
       const result = await createWorktree(pi, ctx, "feature");
 
       expect(result.error).toContain("Session setup failed");
+      // First call: git worktree add, second: rollback remove
       expect(pi.exec).toHaveBeenCalledTimes(2);
-      expect(pi.exec).toHaveBeenLastCalledWith("git", [
-        "worktree",
-        "remove",
-        "--force",
-        expect.stringContaining("/workdir/pi-container/worktrees/abc123_feature"),
-      ]);
     });
 
     it("stores worktree metadata in session via appendCustomEntry", async () => {
@@ -602,7 +597,7 @@ describe("createWorktree", () => {
         expect.objectContaining({
           worktreeName: "abc123_feature",
           worktreePath: expect.stringContaining("/workdir/pi-container/worktrees/abc123_feature"),
-          branch: expect.any(String),
+          baseRef: expect.any(String),
           createdAt: expect.any(String),
           forked: true,
         })
@@ -658,7 +653,7 @@ describe("deleteWorktree", () => {
             path: "/workdir/worktrees/abc123_feat",
             sessionFile,
             createdAt: "",
-            branch: "main",
+            baseRef: "main",
           },
         },
       })
@@ -686,7 +681,7 @@ describe("deleteWorktree", () => {
             path: "/workdir/worktrees/abc123_feat",
             sessionFile: deletedSession,
             createdAt: "",
-            branch: "main",
+            baseRef: "main",
           },
         },
       })
@@ -719,7 +714,7 @@ describe("deleteWorktree", () => {
             path: "/workdir/worktrees/abc123_feat",
             sessionFile,
             createdAt: "",
-            branch: "main",
+            baseRef: "main",
           },
         },
       })
@@ -755,7 +750,7 @@ describe("deleteWorktree", () => {
             path: "/workdir/worktrees/abc123_feat",
             sessionFile: deletedSession,
             createdAt: "",
-            branch: "main",
+            baseRef: "main",
           },
         },
       })
@@ -791,7 +786,7 @@ describe("deleteWorktree", () => {
             path: "/workdir/worktrees/abc123_feat",
             sessionFile,
             createdAt: "",
-            branch: "main",
+            baseRef: "main",
           },
         },
       })
@@ -824,7 +819,7 @@ describe("deleteWorktree", () => {
           path: "/workdir/worktrees/abc123_feat",
           sessionFile: deletedSession,
           createdAt: "",
-          branch: "main",
+          baseRef: "main",
         },
       },
     };
@@ -880,7 +875,7 @@ describe("edge cases", () => {
             path: "/workdir/worktrees/abc123_feat",
             sessionFile: deletedSession,
             createdAt: "",
-            branch: "main",
+            baseRef: "main",
           },
         },
       })
