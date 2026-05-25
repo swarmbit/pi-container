@@ -119,7 +119,7 @@ function findContainerDir(projectDir: string): string {
 }
 
 function findEnvFile(projectDir: string): string {
-  const candidate = path.join(projectDir, ".env");
+  const candidate = path.join(projectDir, ".pi-container-env");
   if (fs.existsSync(candidate)) {
     return candidate;
   }

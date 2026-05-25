@@ -96,16 +96,16 @@ describe("buildDockerRunArgs", () => {
     expect(workspaceEntry).toBe("WORKSPACE_DIR=/project");
   });
 
-  it("includes --env-file when .env exists", () => {
-    const config = makeFullConfig({ envFile: "/project/.env" });
+  it("includes --env-file when .pi-container-env exists", () => {
+    const config = makeFullConfig({ envFile: "/project/.pi-container-env" });
     const args = buildDockerRunArgs(config, ["pi"]);
 
     expect(args).toContain("--env-file");
     const efIdx = args.indexOf("--env-file");
-    expect(args[efIdx + 1]).toBe("/project/.env");
+    expect(args[efIdx + 1]).toBe("/project/.pi-container-env");
   });
 
-  it("does not include --env-file when no .env", () => {
+  it("does not include --env-file when no .pi-container-env", () => {
     const config = makeFullConfig({ envFile: "" });
     const args = buildDockerRunArgs(config, ["pi"]);
 

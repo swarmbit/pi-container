@@ -120,7 +120,7 @@ export function buildDockerRunArgs(config: PiContainerConfig & RuntimeContext, c
   // Mount pi config directory (host → container)
   args.push("-v", `${config.configDir}:/home/pi-user/.pi`);
 
-  // Environment file (if .env exists)
+  // Environment file (if .pi-container-env exists)
   if (config.envFile) {
     args.push("--env-file", config.envFile);
   }

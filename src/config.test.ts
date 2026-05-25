@@ -55,11 +55,11 @@ describe("loadConfig", () => {
   });
 
   it("detects .env file", () => {
-    fs.writeFileSync(path.join(tmpDir, ".env"), "ANTHROPIC_API_KEY=sk-test");
+    fs.writeFileSync(path.join(tmpDir, ".pi-container-env"), "ANTHROPIC_API_KEY=sk-test");
     process.chdir(tmpDir);
 
     const config = loadConfig({ homeDir: tmpDir });
-    expect(config.envFile).toBe(path.join(tmpDir, ".env"));
+    expect(config.envFile).toBe(path.join(tmpDir, ".pi-container-env"));
   });
 
   it("returns empty envFile when .env doesn't exist", () => {

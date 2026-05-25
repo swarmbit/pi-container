@@ -149,14 +149,14 @@ This file is not committed to git — it's for individual user preferences.
 
 ### API keys
 
-Add API keys to `.env` in your project root:
+Add API keys to `.pi-container-env` in your project root:
 
 ```bash
-cp .env.example .env
-# Edit .env with your keys
+cp .pi-container-env.example .pi-container-env
+# Edit .pi-container-env with your keys
 ```
 
-The `.env` file is automatically loaded and passed to the container.
+The `.pi-container-env` file is automatically loaded and passed to the container.
 
 ## Multiple instances
 
