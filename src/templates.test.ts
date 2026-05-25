@@ -70,6 +70,21 @@ describe("generateDockerfile", () => {
     expect(df).toContain("Do not edit");
   });
 
+  it("appends extension block when provided", () => {
+    const df = generateDockerfile("RUN apt-get install -y python3");
+    expect(df).toContain("# ---------- Extension from .pi/pi-container.yml ----------");
+    expect(df).toContain("RUN apt-get install -y python3");
+    // Should appear after the template's CMD
+    const cmdIndex = df.indexOf('CMD ["pi"]');
+    const extIndex = df.indexOf("RUN apt-get install -y python3");
+    expect(extIndex).toBeGreaterThan(cmdIndex);
+  });
+
+  it("does not include extension comment when no extension provided", () => {
+    const df = generateDockerfile();
+    expect(df).not.toContain("Extension from .pi/pi-container.yml");
+  });
+
   it("injects pi version in all ARG lines", () => {
     const df = generateDockerfile();
     const argLines = df.split("\n").filter((line: string) => line.startsWith("ARG PI_VERSION="));

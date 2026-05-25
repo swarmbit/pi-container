@@ -1,0 +1,12 @@
+{
+  "name": "worktree",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Pi extension for managing git worktrees with a primary/secondary agent model",
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  }
+}

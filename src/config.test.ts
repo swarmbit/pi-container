@@ -73,6 +73,41 @@ describe("loadConfig", () => {
     expect(config.env).toEqual({});
   });
 
+  it("detects dockerfileExtension from project config", () => {
+    const containerDir = path.join(tmpDir, ".pi");
+    fs.mkdirSync(containerDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(containerDir, "pi-container.yml"),
+      "dockerfileExtension: |\n  RUN apt-get install -y python3"
+    );
+    process.chdir(tmpDir);
+
+    const config = loadConfig({ homeDir: tmpDir });
+    expect(config.dockerfileExtension).toBe("RUN apt-get install -y python3");
+  });
+
+  it("project dockerfileExtension overrides user config", () => {
+    const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-home-"));
+    fs.mkdirSync(path.join(homeDir, ".pi"), { recursive: true });
+    fs.writeFileSync(
+      path.join(homeDir, ".pi", "pi-container.yml"),
+      "dockerfileExtension: |\n  RUN echo user"
+    );
+
+    const containerDir = path.join(tmpDir, ".pi");
+    fs.mkdirSync(containerDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(containerDir, "pi-container.yml"),
+      "dockerfileExtension: |\n  RUN echo project"
+    );
+
+    process.chdir(tmpDir);
+    const config = loadConfig({ homeDir });
+    expect(config.dockerfileExtension).toBe("RUN echo project");
+
+    fs.rmSync(homeDir, { recursive: true, force: true });
+  });
+
   it("projectDir equals CWD", () => {
     process.chdir(tmpDir);
     const config = loadConfig({ homeDir: tmpDir });

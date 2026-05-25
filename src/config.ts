@@ -43,6 +43,7 @@ export interface PortMapping {
 export interface PiContainerConfig {
   ports: PortMapping[];
   env: Record<string, string>;
+  dockerfileExtension?: string;
 }
 
 /** Runtime context (derived from environment, not user-configurable). */
@@ -65,6 +66,7 @@ export interface LoadConfigOptions {
 interface ConfigFile {
   ports?: (number | string)[];
   env?: Record<string, string>;
+  dockerfileExtension?: string;
 }
 
 // ── Loading ────────────────────────────────────────────────────
@@ -106,9 +108,14 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig & Run
     ...(userConfig.env ?? {}),
   };
 
+  // Dockerfile extension: project config overrides user config
+  const dockerfileExtension =
+    projectConfig.dockerfileExtension ?? userConfig.dockerfileExtension;
+
   return {
     ports,
     env,
+    dockerfileExtension,
     configDir,
     containerDir,
     projectDir,

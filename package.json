@@ -2,6 +2,9 @@
   "name": "pi-container",
   "version": "1.0.0",
   "description": "Run Pi Coding Agent in Docker with team-standard extensions and settings",
+  "workspaces": [
+    "package/extensions/*"
+  ],
   "bin": {
     "pi-container": "./dist/cli.js"
   },
@@ -22,6 +25,7 @@
     "js-yaml": "^4.1.0"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^0.75.5",
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^22.0.0",
     "typescript": "^5.7.0",

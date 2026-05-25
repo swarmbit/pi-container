@@ -18,12 +18,22 @@ const TEMPLATES_DIR = path.join(__dirname, "..", "templates");
 
 /**
  * Load and populate the Dockerfile template.
- * Only {{piVersion}} is injected — everything else is static.
+ * {{piVersion}} is injected, and an optional extension block
+ * (from .pi/pi-container.yml) is appended at the end.
  */
-export function generateDockerfile(): string {
+export function generateDockerfile(extension?: string): string {
   const templatePath = path.join(TEMPLATES_DIR, "Dockerfile");
   let content = fs.readFileSync(templatePath, "utf-8");
   content = content.replace(/\{\{piVersion\}\}/g, PI_VERSION);
+
+  if (extension) {
+    content =
+      content.trimEnd() +
+      "\n\n# ---------- Extension from .pi/pi-container.yml ----------\n" +
+      extension.trimEnd() +
+      "\n";
+  }
+
   return content;
 }
 

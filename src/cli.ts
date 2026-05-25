@@ -62,6 +62,8 @@ Config file schema:
     - 8080:80     # host 8080 → container 80
   env:
     CUSTOM_ENV: sk-xxx  # passed to the container
+  dockerfileExtension: |
+    RUN apt-get update && apt-get install -y python3  # extra image steps
 `.trim());
 }
 
@@ -157,7 +159,7 @@ async function main(): Promise<void> {
   // Dispatch command
   switch (command) {
     case "build":
-      buildImage();
+      buildImage(config.dockerfileExtension);
       break;
     case "shell":
       shellInContainer(config);
@@ -208,6 +210,11 @@ function printDryRun(config: ReturnType<typeof loadConfig>, piArgs: string[]): v
     }
   } else {
     console.log(`  ports:          (none)`);
+  }
+  if (config.dockerfileExtension) {
+    console.log("  dockerfileExtension: (present)");
+  } else {
+    console.log(`  dockerfileExtension: (none)`);
   }
   console.log();
   console.log("Config sources:");

@@ -34,10 +34,10 @@ export function imageExists(tag: string): boolean {
 
 // ── Build ───────────────────────────────────────────────────
 
-export function buildImage(): void {
+export function buildImage(dockerfileExtension?: string): void {
   console.log(`🔨 Building ${PI_IMAGE} (pi v${PI_VERSION})...`);
 
-  const buildCtx = createBuildContext();
+  const buildCtx = createBuildContext(dockerfileExtension);
 
   try {
     const args = [
@@ -65,17 +65,17 @@ export function buildImage(): void {
   }
 }
 
-export function buildIfNeeded(): void {
+export function buildIfNeeded(dockerfileExtension?: string): void {
   if (!imageExists(PI_IMAGE)) {
     console.log("📦 Image not found. Building...");
-    buildImage();
+    buildImage(dockerfileExtension);
   }
 }
 
 // ── Run ─────────────────────────────────────────────────────
 
 export function runContainer(config: PiContainerConfig & RuntimeContext, piArgs: string[]): void {
-  buildIfNeeded();
+  buildIfNeeded(config.dockerfileExtension);
 
   const args = buildDockerRunArgs(config, piArgs);
   const result = spawnSync("docker", args, { stdio: "inherit" });
@@ -88,7 +88,7 @@ export function runContainer(config: PiContainerConfig & RuntimeContext, piArgs:
 // ── Shell ───────────────────────────────────────────────────
 
 export function shellInContainer(config: PiContainerConfig & RuntimeContext): void {
-  buildIfNeeded();
+  buildIfNeeded(config.dockerfileExtension);
 
   console.log("🐚 Opening shell in pi container...");
   const args = buildDockerRunArgs(config, ["/bin/bash"]);
@@ -159,11 +159,11 @@ export function buildDockerRunArgs(config: PiContainerConfig & RuntimeContext, c
 //   - package/ (built-in, from installed module)
 //   - settings/ (built-in, from installed module)
 
-function createBuildContext(): string {
+function createBuildContext(dockerfileExtension?: string): string {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-build-"));
 
   // Generate Dockerfile
-  const dockerfile = generateDockerfile();
+  const dockerfile = generateDockerfile(dockerfileExtension);
   fs.writeFileSync(path.join(tmpDir, "Dockerfile"), dockerfile);
 
   // Generate entrypoint
