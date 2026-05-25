@@ -154,7 +154,7 @@ Pass environment variables (like API keys) to the container via `env` in your co
 ```yaml
 # .pi/pi-container.yml
 env:
-  ANTHROPIC_API_KEY: sk-xxx
+  CUSTOM_ENV: sk-xxx
 ```
 
 User config overrides project config for the same key, and project-only keys are preserved:
@@ -162,14 +162,14 @@ User config overrides project config for the same key, and project-only keys are
 ```yaml
 # .pi/pi-container.yml (project)
 env:
-  ANTHROPIC_API_KEY: sk-team-key
+  CUSTOM_ENV: sk-team-key
   PROJECT_VAR: value
 
 # ~/.pi/pi-container.yml (user)
 env:
-  ANTHROPIC_API_KEY: sk-personal-key
+  CUSTOM_ENV: sk-personal-key
 
-# Result: ANTHROPIC_API_KEY=sk-personal-key, PROJECT_VAR=value
+# Result: CUSTOM_ENV=sk-personal-key, PROJECT_VAR=value
 ```
 
 ## Multiple instances

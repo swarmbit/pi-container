@@ -61,7 +61,7 @@ Config file schema:
     - 6006        # storybook
     - 8080:80     # host 8080 → container 80
   env:
-    ANTHROPIC_API_KEY: sk-xxx  # passed to the container
+    CUSTOM_ENV: sk-xxx  # passed to the container
 `.trim());
 }
 
@@ -136,7 +136,7 @@ async function main(): Promise<void> {
   // Load config from .pi/, user config
   const config = loadConfig({ cliPorts });
 
-  fs.mkdirSync(config.configDir, { recursive: true });
+  fs.mkdirSync(config.configDir + "/agent", { recursive: true });
 
   // Check port availability before running
   if ((command === "run" || command === "shell") && config.ports.length > 0) {
