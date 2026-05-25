@@ -107,12 +107,17 @@ describe("CLI dry-run", () => {
     expect(output).toContain("Project config:");
   });
 
-  it("detects .env file", () => {
-    fs.writeFileSync(path.join(tmpDir, ".pi-container-env"), "ANTHROPIC_API_KEY=sk-test");
+  it("shows env from pi-container.yml", () => {
+    const containerDir = path.join(tmpDir, ".pi");
+    fs.mkdirSync(containerDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(containerDir, "pi-container.yml"),
+      "env:\n  ANTHROPIC_API_KEY: sk-test"
+    );
     const output = runCli("dry-run", { cwd: tmpDir });
 
-    expect(output).toContain("--env-file");
-    expect(output).toContain(".pi-container-env");
+    expect(output).toContain("ANTHROPIC_API_KEY");
+    expect(output).toContain("sk-test");
   });
 
   it("shows ports from pi-container.yml", () => {

@@ -60,6 +60,8 @@ Config file schema:
     - 3000        # dev server
     - 6006        # storybook
     - 8080:80     # host 8080 → container 80
+  env:
+    ANTHROPIC_API_KEY: sk-xxx  # passed to the container
 `.trim());
 }
 
@@ -190,7 +192,14 @@ function printDryRun(config: ReturnType<typeof loadConfig>, piArgs: string[]): v
   console.log(`  projectDir:     ${config.projectDir}`);
   console.log(`  workspaceDir:   ${config.workspaceDir}`);
   console.log(`  configDir:      ${config.configDir}`);
-  console.log(`  envFile:        ${config.envFile || "(none)"}`);
+  if (Object.keys(config.env).length > 0) {
+    console.log("  env:");
+    for (const [key, value] of Object.entries(config.env)) {
+      console.log(`    ${key}: ${value}`);
+    }
+  } else {
+    console.log(`  env:            (none)`);
+  }
   if (config.ports.length > 0) {
     console.log("  ports:");
     for (const p of config.ports) {
@@ -204,7 +213,6 @@ function printDryRun(config: ReturnType<typeof loadConfig>, piArgs: string[]): v
   console.log("Config sources:");
   console.log(`  User config:    ${userConfigPath} ${userConfigExists ? "(found)" : "(not found)"}`);
   console.log(`  Project config: ${config.containerDir ? config.containerDir + "/pi-container.yml" : "(no .pi dir)"}`);
-  console.log(`  .env file:      ${config.envFile || "(none)"}`);
   console.log();
   const cmd = piArgs.length > 0 ? ["pi", ...piArgs] : ["pi"];
   const runArgs = buildDockerRunArgs(config, cmd);

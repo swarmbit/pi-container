@@ -54,18 +54,23 @@ describe("loadConfig", () => {
     expect(config.containerDir).toBe(containerDir);
   });
 
-  it("detects .env file", () => {
-    fs.writeFileSync(path.join(tmpDir, ".pi-container-env"), "ANTHROPIC_API_KEY=sk-test");
+  it("detects env from project config", () => {
+    const containerDir = path.join(tmpDir, ".pi");
+    fs.mkdirSync(containerDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(containerDir, "pi-container.yml"),
+      "env:\n  ANTHROPIC_API_KEY: sk-test"
+    );
     process.chdir(tmpDir);
 
     const config = loadConfig({ homeDir: tmpDir });
-    expect(config.envFile).toBe(path.join(tmpDir, ".pi-container-env"));
+    expect(config.env).toEqual({ ANTHROPIC_API_KEY: "sk-test" });
   });
 
-  it("returns empty envFile when .env doesn't exist", () => {
+  it("returns empty env when no config exists", () => {
     process.chdir(tmpDir);
     const config = loadConfig({ homeDir: tmpDir });
-    expect(config.envFile).toBe("");
+    expect(config.env).toEqual({});
   });
 
   it("projectDir equals CWD", () => {
@@ -117,6 +122,30 @@ describe("loadConfig", () => {
       process.chdir(tmpDir);
       const config = loadConfig({ homeDir: tmpDir, cliPorts: ["3000:4000"] });
       expect(config.ports).toEqual([{ host: 3000, container: 4000 }]);
+    });
+
+    it("user env overrides project env on conflict", () => {
+      // Use a separate home dir for user config
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-home-"));
+      fs.mkdirSync(path.join(homeDir, ".pi"), { recursive: true });
+      fs.writeFileSync(
+        path.join(homeDir, ".pi", "pi-container.yml"),
+        "env:\n  KEY: user-value"
+      );
+
+      // Project config
+      const containerDir = path.join(tmpDir, ".pi");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "pi-container.yml"),
+        "env:\n  KEY: project-value\n  PROJECT_ONLY: yes"
+      );
+
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir });
+      expect(config.env).toEqual({ KEY: "user-value", PROJECT_ONLY: "yes" });
+
+      fs.rmSync(homeDir, { recursive: true, force: true });
     });
 
     it("falls back gracefully when config files are missing", () => {

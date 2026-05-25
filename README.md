@@ -147,16 +147,30 @@ This file is not committed to git — it's for individual user preferences.
 2. User config (`~/.pi/pi-container.yml`) — personal, not committed
 3. Project config (`.pi/pi-container.yml`) — team, committed to git
 
-### API keys
+### Environment variables
 
-Add API keys to `.pi-container-env` in your project root:
+Pass environment variables (like API keys) to the container via `env` in your config file:
 
-```bash
-cp .pi-container-env.example .pi-container-env
-# Edit .pi-container-env with your keys
+```yaml
+# .pi/pi-container.yml
+env:
+  ANTHROPIC_API_KEY: sk-xxx
 ```
 
-The `.pi-container-env` file is automatically loaded and passed to the container.
+User config overrides project config for the same key, and project-only keys are preserved:
+
+```yaml
+# .pi/pi-container.yml (project)
+env:
+  ANTHROPIC_API_KEY: sk-team-key
+  PROJECT_VAR: value
+
+# ~/.pi/pi-container.yml (user)
+env:
+  ANTHROPIC_API_KEY: sk-personal-key
+
+# Result: ANTHROPIC_API_KEY=sk-personal-key, PROJECT_VAR=value
+```
 
 ## Multiple instances
 

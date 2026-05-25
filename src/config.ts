@@ -1,19 +1,21 @@
 // ============================================================
 // pi-container — Config discovery and loading
 // ============================================================
-// The only user-configurable setting is ports.
+// Configurable settings: ports and env.
 // Pi version and image are baked into this npm package.
 //
-// Config precedence for ports (highest wins):
+// Config precedence (highest wins):
 //   1. CLI flags              (-p, --port)
 //   2. User config            (~/.pi/pi-container.yml)
 //   3. Project config           (.pi/pi-container.yml)
-//   4. (none — ports have no built-in default)
+//   4. (none — no built-in defaults for ports/env)
 //
 // Config file schema:
 //   ports:
 //     - 3000
 //     - 8080:80
+//   env:
+//     ANTHROPIC_API_KEY: sk-xxx
 // ============================================================
 
 import * as path from "path";
@@ -40,6 +42,7 @@ export interface PortMapping {
 /** User-configurable settings (from pi-container.yml). */
 export interface PiContainerConfig {
   ports: PortMapping[];
+  env: Record<string, string>;
 }
 
 /** Runtime context (derived from environment, not user-configurable). */
@@ -48,7 +51,6 @@ export interface RuntimeContext {
   containerDir: string;   // absolute path to .pi dir, "" if none
   projectDir: string;     // absolute path — CWD
   workspaceDir: string;   // container path — e.g. /myproject
-  envFile: string;        // absolute path to .env, "" if none
 }
 
 export interface LoadConfigOptions {
@@ -62,6 +64,7 @@ export interface LoadConfigOptions {
 
 interface ConfigFile {
   ports?: (number | string)[];
+  env?: Record<string, string>;
 }
 
 // ── Loading ────────────────────────────────────────────────────
@@ -90,7 +93,6 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig & Run
   }
 
   const configDir = path.join(homeDir, ".pi");
-  const envFile = findEnvFile(projectDir);
 
   // Resolve port mappings: CLI > user config > project config
   const cliPorts: PortMapping[] = (options?.cliPorts ?? []).map(parsePortMapping);
@@ -98,13 +100,19 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig & Run
   const projectPorts: PortMapping[] = parseConfigPorts(projectConfig.ports);
   const ports = mergePorts(cliPorts, userPorts, projectPorts);
 
+  // Resolve env: user config overrides project config
+  const env: Record<string, string> = {
+    ...(projectConfig.env ?? {}),
+    ...(userConfig.env ?? {}),
+  };
+
   return {
     ports,
+    env,
     configDir,
     containerDir,
     projectDir,
     workspaceDir: `/${path.basename(projectDir)}`,
-    envFile,
   };
 }
 
@@ -112,14 +120,6 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig & Run
 
 function findContainerDir(projectDir: string): string {
   const candidate = path.join(projectDir, ".pi");
-  if (fs.existsSync(candidate)) {
-    return candidate;
-  }
-  return "";
-}
-
-function findEnvFile(projectDir: string): string {
-  const candidate = path.join(projectDir, ".pi-container-env");
   if (fs.existsSync(candidate)) {
     return candidate;
   }

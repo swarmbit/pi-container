@@ -13,6 +13,7 @@ import { PiContainerConfig, PI_VERSION, PI_IMAGE } from "./config";
 function makeConfig(overrides: Partial<PiContainerConfig> = {}): PiContainerConfig {
   return {
     ports: [],
+    env: {},
     ...overrides,
   };
 }
@@ -23,17 +24,16 @@ interface FullConfig extends PiContainerConfig {
   containerDir: string;
   projectDir: string;
   workspaceDir: string;
-  envFile: string;
 }
 
 function makeFullConfig(overrides: Partial<FullConfig> = {}): FullConfig {
   return {
     ports: [],
+    env: {},
     configDir: "/home/user/.pi",
     containerDir: "",
     projectDir: "/project",
     workspaceDir: "/project",
-    envFile: "",
     ...overrides,
   };
 }
@@ -96,20 +96,21 @@ describe("buildDockerRunArgs", () => {
     expect(workspaceEntry).toBe("WORKSPACE_DIR=/project");
   });
 
-  it("includes --env-file when .pi-container-env exists", () => {
-    const config = makeFullConfig({ envFile: "/project/.pi-container-env" });
+  it("passes env vars from config as -e flags", () => {
+    const config = makeFullConfig({ env: { ANTHROPIC_API_KEY: "sk-test", PORT: "3000" } });
     const args = buildDockerRunArgs(config, ["pi"]);
 
-    expect(args).toContain("--env-file");
-    const efIdx = args.indexOf("--env-file");
-    expect(args[efIdx + 1]).toBe("/project/.pi-container-env");
+    const envEntries = args.filter((_, i) => args[i - 1] === "-e" && _.includes("="));
+    expect(envEntries).toContain("ANTHROPIC_API_KEY=sk-test");
+    expect(envEntries).toContain("PORT=3000");
   });
 
-  it("does not include --env-file when no .pi-container-env", () => {
-    const config = makeFullConfig({ envFile: "" });
+  it("does not add env flags when no env configured", () => {
+    const config = makeFullConfig({ env: {} });
     const args = buildDockerRunArgs(config, ["pi"]);
 
-    expect(args).not.toContain("--env-file");
+    const envEntries = args.filter((a) => a.startsWith("ANTHROPIC") || a.startsWith("PORT="));
+    expect(envEntries).toHaveLength(0);
   });
 
   it("uses the PI_IMAGE constant", () => {
