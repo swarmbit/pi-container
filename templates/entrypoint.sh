@@ -35,25 +35,5 @@ fi
 # pi discovers its resources and registers the theme.
 gosu pi-user pi install /opt/pi-package
 
-# ── Install default third-party packages ────────────────
-# These are pre-installed on first startup and cached for
-# subsequent runs. pi install is idempotent — already-
-# registered packages are skipped.
-gosu pi-user pi install npm:pi-tps
-
-# ── Install additional team packages ────────────────────
-# TEAM_PACKAGES is a comma-separated list set via -e in
-# docker run, sourced from .pi/config.yml.
-# pi install is idempotent — already-registered packages
-# are skipped on subsequent runs.
-if [ -n "${TEAM_PACKAGES}" ]; then
-  saved_ifs="${IFS}"
-  IFS=','
-  for pkg in ${TEAM_PACKAGES}; do
-    gosu pi-user pi install "${pkg}"
-  done
-  IFS="${saved_ifs}"
-fi
-
 # ── Drop privileges and run command as pi-user ──────────
 exec gosu pi-user "$@"

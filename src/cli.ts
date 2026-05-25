@@ -9,14 +9,13 @@
 //   pi-container build                    # build/rebuild image
 //   pi-container shell                    # drop into container shell
 //
-// Config precedence (highest wins):
-//   1. Environment variables (PI_VERSION, PI_IMAGE_TAG, PI_CONFIG_DIR)
+// Port config precedence (highest wins):
+//   1. CLI flags              (-p, --port)
 //   2. User config            (~/.pi/pi-container.yml)
-//   3. Project config           (.pi/config.yml)
-//   4. Built-in defaults
+//   3. Project config           (.pi/pi-container.yml)
 // ============================================================
 
-import { loadConfig, getUserConfigPath, PiContainerConfig, checkPortAvailable } from "./config";
+import { loadConfig, getUserConfigPath, PI_VERSION, PI_IMAGE, checkPortAvailable } from "./config";
 import { buildImage, runContainer, shellInContainer, buildDockerRunArgs } from "./docker";
 import * as fs from "fs";
 import * as path from "path";
@@ -51,52 +50,23 @@ Examples:
   pi-container build                        # build image
   pi-container shell                        # container shell
 
-Environment:
-  PI_VERSION     Pi version (default: 0.75.5)
-  PI_IMAGE_TAG   Docker image tag (default: pi-agent:<version>)
-  PI_CONFIG_DIR  Host path for pi config (default: ~/.pi)
-  PI_PORTS       Comma-separated ports, e.g. "3000,8080:3000,9000-9010"
-
-Config precedence (highest wins):
-  1. Environment variables
+Port config precedence (highest wins):
+  1. CLI flags (-p, --port)
   2. User config:    ${userConfigPath}
-  3. Project config: .pi/config.yml
-  4. Built-in defaults
+  3. Project config: .pi/pi-container.yml
 
-Project config:
-  Place a .pi/ directory in your project root:
-    .pi/config.yml              — pi version, image tag, ports, packages
-    .pi/package/                — team pi package (extensions, themes, skills)
-    .pi/package/package.json    — pi package manifest
-    .pi/settings/               — default settings template
-
-  Example .pi/config.yml:
-    piVersion: "0.75.5"
-    ports:
-      - 3000        # dev server
-      - 6006        # storybook
-      - 8080:80     # host 8080 → container 80
-    packages:
-      - npm:@some-team/safety-ext@1.0.0
-      - git:github.com/team/repo@v2
-
-User config:
-  Create ${userConfigPath} for personal overrides:
-    piVersion: "0.75.4"         # Override pi version
-    imageTag: "my-registry/pi"  # Override image tag
-    configDir: "~/pi-work"      # Use a different pi config directory
-    ports:                       # Override ports
-      - 3000
-
-  Pi config is mounted from the host at ~/.pi so settings,
-  sessions, and auth tokens persist natively on your machine.
+Config file schema:
+  ports:
+    - 3000        # dev server
+    - 6006        # storybook
+    - 8080:80     # host 8080 → container 80
 `.trim());
 }
 
 function printVersion(): void {
   // eslint-disable-next-line @typescript-eslint/no-var-requires
   const pkg = require("../package.json");
-  console.log(`pi-container ${pkg.version}`);
+  console.log(`pi-container ${pkg.version} (pi v${PI_VERSION})`);
 }
 
 async function main(): Promise<void> {
@@ -161,10 +131,10 @@ async function main(): Promise<void> {
     }
   }
 
-  // Load config from .pi/, user config, and environment
+  // Load config from .pi/, user config
   const config = loadConfig({ cliPorts });
 
-  fs.mkdirSync(path.join(config.configDir), { recursive: true });
+  fs.mkdirSync(config.configDir, { recursive: true });
 
   // Check port availability before running
   if ((command === "run" || command === "shell") && config.ports.length > 0) {
@@ -176,7 +146,7 @@ async function main(): Promise<void> {
       }
       console.error("");
       console.error("To fix, either:");
-      console.error("  - Change the host port in .pi/config.yml (e.g., \"3001:3000\")");
+      console.error("  - Change the host port in .pi/pi-container.yml (e.g., \"3001:3000\")");
       console.error("  - Stop the process using the port");
       process.exit(1);
     }
@@ -185,13 +155,13 @@ async function main(): Promise<void> {
   // Dispatch command
   switch (command) {
     case "build":
-      buildImage(config);
+      buildImage();
       break;
     case "shell":
       shellInContainer(config);
       break;
     case "run":
-      runContainer(config, piArgs.length > 0 ? piArgs : ["pi"]);
+      runContainer(config, piArgs.length > 0 ? ["pi", ...piArgs] : ["pi"]);
       break;
     case "dry-run":
       printDryRun(config, piArgs);
@@ -210,28 +180,17 @@ async function checkPorts(ports: { host: number; container: number }[]): Promise
   return conflicts;
 }
 
-function printDryRun(config: PiContainerConfig, piArgs: string[]): void {
+function printDryRun(config: ReturnType<typeof loadConfig>, piArgs: string[]): void {
   const userConfigPath = getUserConfigPath();
   const userConfigExists = fs.existsSync(userConfigPath);
 
   console.log("Configuration:");
-  console.log(`  piVersion:      ${config.piVersion}`);
-  console.log(`  imageTag:       ${config.imageTag}`);
+  console.log(`  version:        ${PI_VERSION}`);
+  console.log(`  image:          ${PI_IMAGE}`);
   console.log(`  projectDir:     ${config.projectDir}`);
   console.log(`  workspaceDir:   ${config.workspaceDir}`);
   console.log(`  configDir:      ${config.configDir}`);
   console.log(`  envFile:        ${config.envFile || "(none)"}`);
-  console.log(`  containerDir:   ${config.containerDir || "(none)"}`);
-  console.log(`  hasPackage:    ${config.hasPackage}`);
-  console.log(`  hasSettings:    ${config.hasSettings}`);
-  if (config.packages.length > 0) {
-    console.log(`  packages:`);
-    for (const pkg of config.packages) {
-      console.log(`    - ${pkg}`);
-    }
-  } else {
-    console.log(`  packages:       (none)`);
-  }
   if (config.ports.length > 0) {
     console.log("  ports:");
     for (const p of config.ports) {
@@ -244,11 +203,11 @@ function printDryRun(config: PiContainerConfig, piArgs: string[]): void {
   console.log();
   console.log("Config sources:");
   console.log(`  User config:    ${userConfigPath} ${userConfigExists ? "(found)" : "(not found)"}`);
-  console.log(`  Project config: ${config.containerDir ? config.containerDir + "/config.yml" : "(no .pi dir)"}`);
+  console.log(`  Project config: ${config.containerDir ? config.containerDir + "/pi-container.yml" : "(no .pi dir)"}`);
   console.log(`  .env file:      ${config.envFile || "(none)"}`);
   console.log();
-  const command = piArgs.length > 0 ? piArgs : ["pi"];
-  const runArgs = buildDockerRunArgs(config, command);
+  const cmd = piArgs.length > 0 ? ["pi", ...piArgs] : ["pi"];
+  const runArgs = buildDockerRunArgs(config, cmd);
   console.log("Docker run command:");
   console.log(`  docker ${runArgs.join(" ")}`);
   console.log();
@@ -256,9 +215,9 @@ function printDryRun(config: PiContainerConfig, piArgs: string[]): void {
     "docker",
     "build",
     "--build-arg",
-    `PI_VERSION=${config.piVersion}`,
+    `PI_VERSION=${PI_VERSION}`,
     "-t",
-    config.imageTag,
+    PI_IMAGE,
     ".",
   ];
   console.log("Docker build command (would be run in temp build context):");

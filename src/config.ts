@@ -1,26 +1,34 @@
 // ============================================================
 // pi-container — Config discovery and loading
 // ============================================================
-// Finds .pi/ directory and loads config from three
-// sources with clear precedence.
+// The only user-configurable setting is ports.
+// Pi version and image are baked into this npm package.
 //
-// Config precedence (highest wins):
-//   1. Environment variables (PI_VERSION, PI_IMAGE_TAG, PI_CONFIG_DIR)
+// Config precedence for ports (highest wins):
+//   1. CLI flags              (-p, --port)
 //   2. User config            (~/.pi/pi-container.yml)
-//   3. Project config           (.pi/config.yml)
-//   4. Built-in defaults
+//   3. Project config           (.pi/pi-container.yml)
+//   4. (none — ports have no built-in default)
 //
-// This means:
-//   - Team sets defaults in .pi/config.yml (committed to git)
-//   - Individual user overrides in ~/.pi/pi-container.yml (personal, not committed)
-//   - One-off overrides via environment variables (ephemeral)
+// Config file schema:
+//   ports:
+//     - 3000
+//     - 8080:80
 // ============================================================
 
 import * as path from "path";
 import * as fs from "fs";
 import yaml from "js-yaml";
 
-const DEFAULT_PI_VERSION = "0.75.5";
+// ── Package constants ──────────────────────────────────────────
+
+/** Pi version shipped by this version of pi-container. */
+export const PI_VERSION = "0.75.5";
+
+/** Docker image tag derived from the pi version. */
+export const PI_IMAGE = `pi-agent:${PI_VERSION}`;
+
+// ── Types ──────────────────────────────────────────────────────
 
 export interface PortMapping {
   /** Host port */
@@ -29,44 +37,44 @@ export interface PortMapping {
   container: number;
 }
 
+/** User-configurable settings (from pi-container.yml). */
 export interface PiContainerConfig {
-  piVersion: string;
-  imageTag: string;
-  configDir: string; // absolute host path (~/.pi)
-  containerDir: string; // absolute path to .pi dir, "" if none
-  projectDir: string; // absolute path — CWD, the workspace mount source
-  workspaceDir: string; // container path — e.g. /workspace or /myproject
-  envFile: string; // absolute path to .env, "" if none
-  hasPackage: boolean; // .pi/package/ exists
-  hasSettings: boolean; // .pi/settings/default-settings.json exists
-  packages: string[]; // third-party packages from config.yml
-  ports: PortMapping[]; // port mappings (host:container)
+  ports: PortMapping[];
 }
 
-interface ConfigFile {
-  piVersion?: string;
-  imageTag?: string;
-  configDir?: string;
-  ports?: (number | string)[];
-  packages?: string[];
+/** Runtime context (derived from environment, not user-configurable). */
+export interface RuntimeContext {
+  configDir: string;      // absolute host path (~/.pi)
+  containerDir: string;   // absolute path to .pi dir, "" if none
+  projectDir: string;     // absolute path — CWD
+  workspaceDir: string;   // container path — e.g. /myproject
+  envFile: string;        // absolute path to .env, "" if none
 }
 
 export interface LoadConfigOptions {
-  /** Override home directory (for testing). Defaults to os.homedir(). */
+  /** Override home directory (for testing). */
   homeDir?: string;
   /** Port mappings from CLI -p flags (highest precedence). */
   cliPorts?: string[];
 }
 
-export function loadConfig(options?: LoadConfigOptions): PiContainerConfig {
+// ── Config file schema ────────────────────────────────────────
+
+interface ConfigFile {
+  ports?: (number | string)[];
+}
+
+// ── Loading ────────────────────────────────────────────────────
+
+export function loadConfig(options?: LoadConfigOptions): PiContainerConfig & RuntimeContext {
   const projectDir = process.cwd();
   const containerDir = findContainerDir(projectDir);
   const homeDir = options?.homeDir ?? getHomeDir();
 
-  // Load project config: .pi/config.yml (team-committed)
+  // Load project config: .pi/pi-container.yml (team-committed)
   let projectConfig: ConfigFile = {};
   if (containerDir) {
-    const configPath = path.join(containerDir, "config.yml");
+    const configPath = path.join(containerDir, "pi-container.yml");
     if (fs.existsSync(configPath)) {
       const raw = fs.readFileSync(configPath, "utf-8");
       projectConfig = (yaml.load(raw) as ConfigFile) || {};
@@ -81,64 +89,26 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig {
     userConfig = (yaml.load(raw) as ConfigFile) || {};
   }
 
-  // Resolve pi version: env > user config > project config > default
-  const piVersion =
-    process.env.PI_VERSION ||
-    userConfig.piVersion ||
-    projectConfig.piVersion ||
-    DEFAULT_PI_VERSION;
-
-  // Resolve image tag: env > user config > project config > derived from version
-  const imageTag =
-    process.env.PI_IMAGE_TAG ||
-    userConfig.imageTag ||
-    projectConfig.imageTag ||
-    `pi-agent:${piVersion}`;
-
-  // Resolve config dir: env > user config > project config > default
-  const configDir =
-    process.env.PI_CONFIG_DIR ||
-    userConfig.configDir ||
-    projectConfig.configDir ||
-    path.join(homeDir, ".pi");
-
-  // Resolve .env file
+  const configDir = path.join(homeDir, ".pi");
   const envFile = findEnvFile(projectDir);
 
-  // Discover package directory (check project root first, then .pi/)
-  const hasPackage =
-    fs.existsSync(path.join(projectDir, "package", "package.json")) ||
-    (containerDir ? fs.existsSync(path.join(containerDir, "package", "package.json")) : false);
-
-  // Discover settings (check project root first, then .pi/)
-  const hasSettings =
-    fs.existsSync(path.join(projectDir, "settings", "default-settings.json")) ||
-    (containerDir ? fs.existsSync(path.join(containerDir, "settings", "default-settings.json")) : false);
-
-  // Resolve packages from project config (third-party packages to pre-install)
-  const packages = projectConfig.packages ?? [];
-
-  // Resolve port mappings: CLI > env > user config > project config
+  // Resolve port mappings: CLI > user config > project config
   const cliPorts: PortMapping[] = (options?.cliPorts ?? []).map(parsePortMapping);
-  const envPorts: PortMapping[] = (process.env.PI_PORTS ? parsePortsString(process.env.PI_PORTS) : []);
   const userPorts: PortMapping[] = parseConfigPorts(userConfig.ports);
   const projectPorts: PortMapping[] = parseConfigPorts(projectConfig.ports);
-  const ports = mergePorts(cliPorts, envPorts, userPorts, projectPorts);
+  const ports = mergePorts(cliPorts, userPorts, projectPorts);
 
   return {
-    piVersion,
-    imageTag,
+    ports,
     configDir,
     containerDir,
     projectDir,
     workspaceDir: `/${path.basename(projectDir)}`,
     envFile,
-    hasPackage,
-    hasSettings,
-    packages,
-    ports,
   };
 }
+
+// ── Discovery helpers ─────────────────────────────────────────
 
 function findContainerDir(projectDir: string): string {
   const candidate = path.join(projectDir, ".pi");
@@ -162,7 +132,7 @@ function getHomeDir(): string {
 
 // ── Port parsing ────────────────────────────────────────────────
 
-/** Parse a single port string like "3000", "8080:3000", or "9000-9010". */
+/** Parse a single port string like "3000" or "8080:3000". */
 export function parsePortMapping(input: string): PortMapping {
   const trimmed = input.trim();
 
@@ -174,7 +144,11 @@ export function parsePortMapping(input: string): PortMapping {
     }
     const host = parseInt(parts[0], 10);
     const container = parseInt(parts[1], 10);
-    if (isNaN(host) || isNaN(container) || host <= 0 || container <= 0 || host > 65535 || container > 65535) {
+    if (
+      isNaN(host) || isNaN(container) ||
+      String(host) !== parts[0] || String(container) !== parts[1] ||
+      host <= 0 || container <= 0 || host > 65535 || container > 65535
+    ) {
       throw new Error(`Invalid port mapping: "${input}". Ports must be 1-65535.`);
     }
     return { host, container };
@@ -183,19 +157,19 @@ export function parsePortMapping(input: string): PortMapping {
   // Range — "9000-9010"
   if (trimmed.includes("-")) {
     throw new Error(
-      `Port ranges ("${input}") are only supported in config files and PI_PORTS, not as individual mappings. Use separate entries instead.`
+      `Port ranges ("${input}") are only supported in config files, not as individual mappings. Use separate entries instead.`
     );
   }
 
   // Simple port — "3000"
   const port = parseInt(trimmed, 10);
-  if (isNaN(port) || port <= 0 || port > 65535) {
+  if (isNaN(port) || String(port) !== trimmed || port <= 0 || port > 65535) {
     throw new Error(`Invalid port: "${input}". Must be 1-65535.`);
   }
   return { host: port, container: port };
 }
 
-/** Parse a comma-separated port string (from PI_PORTS env var). Supports ranges. */
+/** Parse a comma-separated port string (from config file). Supports ranges. */
 export function parsePortsString(input: string): PortMapping[] {
   const mappings: PortMapping[] = [];
   for (const part of input.split(",").map((s) => s.trim()).filter(Boolean)) {
@@ -211,7 +185,11 @@ function expandPortPart(part: string): PortMapping[] {
     const [startStr, endStr] = part.split("-");
     const start = parseInt(startStr, 10);
     const end = parseInt(endStr, 10);
-    if (isNaN(start) || isNaN(end) || start > end || start <= 0 || end > 65535) {
+    if (
+      isNaN(start) || isNaN(end) ||
+      String(start) !== startStr || String(end) !== endStr ||
+      start > end || start <= 0 || end > 65535
+    ) {
       throw new Error(`Invalid port range: "${part}"`);
     }
     const mappings: PortMapping[] = [];
@@ -223,10 +201,17 @@ function expandPortPart(part: string): PortMapping[] {
 
   // Host:Container: "8080:3000"
   if (part.includes(":")) {
-    const [hostStr, containerStr] = part.split(":");
-    const host = parseInt(hostStr, 10);
-    const container = parseInt(containerStr, 10);
-    if (isNaN(host) || isNaN(container) || host <= 0 || container <= 0 || host > 65535 || container > 65535) {
+    const parts = part.split(":");
+    if (parts.length !== 2) {
+      throw new Error(`Invalid port mapping: "${part}". Expected HOST:CONTAINER format.`);
+    }
+    const host = parseInt(parts[0], 10);
+    const container = parseInt(parts[1], 10);
+    if (
+      isNaN(host) || isNaN(container) ||
+      String(host) !== parts[0] || String(container) !== parts[1] ||
+      host <= 0 || container <= 0 || host > 65535 || container > 65535
+    ) {
       throw new Error(`Invalid port mapping: "${part}"`);
     }
     return [{ host, container }];
@@ -234,7 +219,7 @@ function expandPortPart(part: string): PortMapping[] {
 
   // Simple port: "3000"
   const port = parseInt(part, 10);
-  if (isNaN(port) || port <= 0 || port > 65535) {
+  if (isNaN(port) || String(port) !== part || port <= 0 || port > 65535) {
     throw new Error(`Invalid port: "${part}"`);
   }
   return [{ host: port, container: port }];
@@ -251,7 +236,7 @@ function parseConfigPorts(ports: (number | string)[] | undefined): PortMapping[]
 }
 
 /** Merge port lists with later entries overriding earlier ones on conflict.
- *  Highest precedence first: CLI > env > user > project. */
+ *  Highest precedence first: CLI > user > project. */
 function mergePorts(...lists: PortMapping[][]): PortMapping[] {
   const seen = new Map<number, PortMapping>();
   // Process in reverse so higher precedence wins

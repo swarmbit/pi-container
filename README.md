@@ -1,16 +1,17 @@
 # pi-container
 
-Run [Pi Coding Agent](https://github.com/earendil-works/pi-coding-agent) in Docker with team-standard packages, extensions, and settings baked into the image.
+Run [Pi Coding Agent](https://github.com/earendil-works/pi-coding-agent) in Docker with a safety extension and default settings baked into the image.
 
 ## Why
 
-Running pi in Docker ensures every team member uses the same environment — same pi version, same extensions, same safety gates.
+Running pi in Docker ensures every team member uses the same environment — same pi version, same safety gates.
 
 `pi-container` makes this simple:
 
 - **CWD-respect mounts**: uses `docker run` directly, so `$(pwd)/` is always mounted as `/<dirname>`
 - **One install**: `npm install -g pi-container` works from any directory
-- **Project customization**: `.pi/` is optional — only needed for team customization
+- **Baked-in defaults**: safety extension, github theme, and sensible settings — no setup required
+- **Port forwarding**: expose container ports for web dev with `-p`
 
 ## Install
 
@@ -25,7 +26,7 @@ npm install -g pi-container
 cd my-project
 pi-container                    # interactive session
 pi-container -- -p "Summarize"  # print mode
-pi-container -- -r               # resume session
+pi-container -- -r              # resume session
 
 # With port forwarding for web dev:
 pi-container -p 3000              # expose port 3000
@@ -36,9 +37,6 @@ pi-container -p 8080:3000        # host 8080 → container 3000
 pi-container build              # build/rebuild the image
 pi-container shell              # open a shell in the container
 pi-container dry-run            # print config and docker commands (debugging)
-
-# Override pi version:
-PI_VERSION=0.75.4 pi-container
 ```
 
 ## How it works
@@ -60,7 +58,7 @@ PI_VERSION=0.75.4 pi-container
 │         │ (registers extensions, themes in settings)      │
 │         ▼                                                  │
 │  ┌─────────────────────────────────────────┐             │
-│  │  /home/pi-user/.pi/                ◄── Host mount           │
+│  │  /home/pi-user/.pi/                ◄── Host mount     │
 │  │    └── agent/                         │             │
 │  │        ├── settings.json   (shared w/ native pi)    │
 │  │        ├── auth.json       (shared w/ native pi)    │
@@ -71,15 +69,15 @@ PI_VERSION=0.75.4 pi-container
 │  └─────────────────────────────────────────┘             │
 │                                                          │
 │  ┌─────────────────────────────────────────┐             │
-│  │  /<project-dir>/               ◄── CWD mount           │
+│  │  /<project-dir>/               ◄── CWD mount         │
 │  │    (your project directory)             │             │
 │  └─────────────────────────────────────────┘             │
 └──────────────────────────────────────────────────────────┘
 ```
 
-- **Baked into the image**: pi binary (pinned version), team pi package (extensions, themes), default settings
-- **Installed on startup**: `pi install /opt/pi-package` registers the team package — extensions, themes, and skills are discovered by pi automatically
-- **Additional packages**: third-party packages (from npm, git, or local paths) are installed on startup via `pi install`
+- **Baked into the image**: pi binary (pinned version), default pi package (safety extension, github theme), default settings
+- **Installed on startup**: `pi install /opt/pi-package` registers the built-in package — extensions and themes are discovered by pi automatically
+- **Additional packages**: use `pi install` inside the container to add packages at runtime
 - **Mounted from host** (persists across runs): `~/.pi` (settings, auth, sessions, extensions)
 - **Mounted from CWD** (your project): mounts `$(pwd)` as `/<dirname>` (e.g., `/myproject`)
 - **Port forwarding** (optional): `-p` flags expose container ports on `localhost`
@@ -88,103 +86,66 @@ Each invocation creates a fresh container. Multiple instances can run simultaneo
 
 ## Configuration
 
+The only configurable setting is **ports**. Pi version and image are determined by the pi-container npm package you have installed.
+
 ### Zero config
 
-Run `pi-container` from any directory. It uses defaults:
+Run `pi-container` from any directory. No configuration needed.
 
-- pi version: `0.75.5`
-- image tag: `pi-agent:<version>`
-- config dir: `~/.pi`
+### Port forwarding
 
-### Project config: `.pi/`
+Expose container ports so you can access web apps from your host machine:
 
-Place a `.pi/` directory in your project root to customize:
+```bash
+# CLI flag
+pi-container -p 3000                # localhost:3000 → container:3000
+pi-container -p 8080:3000           # localhost:8080 → container:3000
+pi-container -p 3000 -p 6006       # multiple ports
 
-```
-my-project/
-├── .pi/
-│   ├── config.yml                # Optional overrides
-│   ├── package/                   # Team pi package (baked into image)
-│   │   ├── package.json           # Pi package manifest
-│   │   ├── extensions/
-│   │   │   └── confirm-dangerous/ # Team extensions
-│   │   │       └── index.ts
-│   │   └── themes/
-│   │       └── github.json       # Team themes
-│   └── settings/
-│       └── default-settings.json # Default pi settings (theme, etc.)
-└── .env                          # API keys (gitignored)
+# Config file — .pi/pi-container.yml
+ports:
+  - 3000
+  - 6006
+  - 8080:80
+
+# Config file — ~/.pi/pi-container.yml
+ports:
+  - 3000
 ```
 
-#### `.pi/package/package.json`
+All ports bind to `127.0.0.1` (localhost only) for security. If a host port is already in use, `pi-container` will report the conflict and exit.
 
-The [pi package](https://github.com/earendil-works/pi-coding-agent) manifest declares what resources the package provides:
+### Project config: `.pi/pi-container.yml`
 
-```json
-{
-  "name": "my-team-defaults",
-  "version": "1.0.0",
-  "private": true,
-  "keywords": ["pi-package"],
-  "pi": {
-    "extensions": ["./extensions"],
-    "themes": ["./themes"]
-  },
-  "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "*"
-  }
-}
-```
-
-Pi convention directories (`extensions/`, `themes/`, `skills/`, `prompts/`) are auto-discovered. You can also add runtime dependencies to `dependencies` — they'll be installed during the Docker build.
-
-#### `.pi/config.yml` (optional)
+Place a `.pi/` directory in your project root for team-shared port configuration:
 
 ```yaml
-piVersion: "0.75.5"
-imageTag: "pi-agent:0.75.5"    # Override image tag
-ports:                          # Export container ports to localhost
-  - 3000                        # Dev server
-  - 6006                        # Storybook
-  - 8080:80                     # Host 8080 → container 80
-packages:                       # Pre-install third-party pi packages
-  - npm:@some-team/safety-ext@1.0.0
-  - git:github.com/team/repo@v2
+# .pi/pi-container.yml
+ports:
+  - 3000        # dev server
+  - 6006        # storybook
+  - 8080:80     # host 8080 → container 80
 ```
 
-Packages listed in `config.yml` are passed to `pi install` on container startup. They're installed on first run and cached in `~/.pi` for subsequent runs.
-
-### Environment variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `PI_VERSION` | `0.75.5` | Pi version to install (overrides user & project config) |
-| `PI_IMAGE_TAG` | `pi-agent:<version>` | Docker image tag (overrides user & project config) |
-| `PI_CONFIG_DIR` | `~/.pi` | Host path for pi config (overrides user & project config) |
-| `PI_PORTS` | *(none)* | Comma-separated ports, e.g. `3000,8080:3000,9000-9010` |
+This file is committed to git — it's for team defaults.
 
 ### User config: `~/.pi/pi-container.yml`
 
-For personal overrides that apply across all projects:
+For personal port overrides that apply across all projects:
 
 ```yaml
 # ~/.pi/pi-container.yml
-piVersion: "0.75.4"        # Pin a different version than the team default
-imageTag: "my-registry/pi"  # Use a custom registry image
-configDir: "~/pi-work"      # Use a different pi config directory
-ports:                       # Override ports
+ports:
   - 3000
 ```
 
 This file is not committed to git — it's for individual user preferences.
 
-### Config precedence (highest wins)
+### Config precedence for ports (highest wins)
 
 1. CLI flags (`-p`, `--port`)
-2. Environment variables (`PI_VERSION`, `PI_IMAGE_TAG`, `PI_CONFIG_DIR`, `PI_PORTS`)
-3. User config (`~/.pi/pi-container.yml`) — personal, not committed
-4. Project config (`.pi/config.yml`) — team, committed to git
-5. Built-in defaults
+2. User config (`~/.pi/pi-container.yml`) — personal, not committed
+3. Project config (`.pi/pi-container.yml`) — team, committed to git
 
 ### API keys
 
@@ -218,30 +179,6 @@ If you need to run two agents on the same project simultaneously, that's a workf
 
 If you use pi both natively and in the container, they share the same config.
 
-### Port forwarding
-
-Expose container ports so you can access web apps from your host machine:
-
-```bash
-# CLI flag
-pi-container -p 3000                # localhost:3000 → container:3000
-pi-container -p 8080:3000           # localhost:8080 → container:3000
-pi-container -p 3000 -p 6006       # multiple ports
-
-# Environment variable
-PI_PORTS=3000,6006 pi-container
-PI_PORTS=3000,8080:3000,9000-9010 pi-container   # ranges supported in env/config
-
-# Config file
-# .pi/config.yml
-ports:
-  - 3000
-  - 6006
-  - 8080:80
-```
-
-All ports bind to `127.0.0.1` (localhost only) for security. If a host port is already in use, `pi-container` will report the conflict and exit.
-
 ## Safety
 
 The default package includes a safety extension:
@@ -254,6 +191,7 @@ The default package includes a safety extension:
 cd pi-container
 npm install
 npm run build          # Compile TypeScript to dist/
+npm test               # Run tests
 node dist/cli.js dry-run  # Test config resolution
 ```
 

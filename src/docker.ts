@@ -10,67 +10,72 @@
 //   - Fresh container per invocation — no state to manage
 //   - Build context is a temp directory created per build,
 //     incorporating only what's needed from .pi/
+//   - Built-in package/ and settings/ are always copied from
+//     the installed module — pi install at runtime handles
+//     any additional packages
 // ============================================================
 
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
-import { execSync, spawnSync } from "child_process";
-import { PiContainerConfig } from "./config";
+import { spawnSync } from "child_process";
+import { PiContainerConfig, RuntimeContext, PI_VERSION, PI_IMAGE } from "./config";
 import { generateDockerfile, generateEntrypoint } from "./templates";
+
+// Module root (sibling to dist/)
+const MODULE_ROOT = path.join(__dirname, "..");
 
 // ── Image management ────────────────────────────────────────
 
 export function imageExists(tag: string): boolean {
-  try {
-    execSync(`docker image inspect ${tag}`, { stdio: "pipe" });
-    return true;
-  } catch {
-    return false;
-  }
+  const result = spawnSync("docker", ["image", "inspect", tag], { stdio: "pipe" });
+  return result.status === 0;
 }
 
 // ── Build ───────────────────────────────────────────────────
 
-export function buildImage(config: PiContainerConfig): void {
-  console.log(`🔨 Building ${config.imageTag} (pi v${config.piVersion})...`);
+export function buildImage(): void {
+  console.log(`🔨 Building ${PI_IMAGE} (pi v${PI_VERSION})...`);
 
-  const buildCtx = createBuildContext(config);
+  const buildCtx = createBuildContext();
 
   try {
-    const cmd = [
-      "docker",
+    const args = [
       "build",
       "--build-arg",
-      `PI_VERSION=${config.piVersion}`,
+      `PI_VERSION=${PI_VERSION}`,
       "-t",
-      config.imageTag,
+      PI_IMAGE,
       ".",
-    ].join(" ");
+    ];
 
-    execSync(cmd, {
+    const result = spawnSync("docker", args, {
       cwd: buildCtx,
       stdio: "inherit",
     });
 
-    console.log(`✅ Built ${config.imageTag}`);
+    if (result.status !== 0 && result.status !== null) {
+      process.exit(result.status);
+    }
+
+    console.log(`✅ Built ${PI_IMAGE}`);
   } finally {
     // Clean up temp directory
     fs.rmSync(buildCtx, { recursive: true, force: true });
   }
 }
 
-export function buildIfNeeded(config: PiContainerConfig): void {
-  if (!imageExists(config.imageTag)) {
+export function buildIfNeeded(): void {
+  if (!imageExists(PI_IMAGE)) {
     console.log("📦 Image not found. Building...");
-    buildImage(config);
+    buildImage();
   }
 }
 
 // ── Run ─────────────────────────────────────────────────────
 
-export function runContainer(config: PiContainerConfig, piArgs: string[]): void {
-  buildIfNeeded(config);
+export function runContainer(config: PiContainerConfig & RuntimeContext, piArgs: string[]): void {
+  buildIfNeeded();
 
   const args = buildDockerRunArgs(config, piArgs);
   const result = spawnSync("docker", args, { stdio: "inherit" });
@@ -82,8 +87,8 @@ export function runContainer(config: PiContainerConfig, piArgs: string[]): void 
 
 // ── Shell ───────────────────────────────────────────────────
 
-export function shellInContainer(config: PiContainerConfig): void {
-  buildIfNeeded(config);
+export function shellInContainer(config: PiContainerConfig & RuntimeContext): void {
+  buildIfNeeded();
 
   console.log("🐚 Opening shell in pi container...");
   const args = buildDockerRunArgs(config, ["/bin/bash"]);
@@ -96,7 +101,7 @@ export function shellInContainer(config: PiContainerConfig): void {
 
 // ── Docker run arg construction ──────────────────────────────
 
-export function buildDockerRunArgs(config: PiContainerConfig, command: string[]): string[] {
+export function buildDockerRunArgs(config: PiContainerConfig & RuntimeContext, command: string[]): string[] {
   const args: string[] = ["run", "--rm"];
 
   // TTY: allocate if we're connected to a terminal
@@ -113,18 +118,11 @@ export function buildDockerRunArgs(config: PiContainerConfig, command: string[])
   args.push("-v", `${config.projectDir}:${config.workspaceDir}:cached`);
 
   // Mount pi config directory (host → container)
-  // Mount the entire ~/.pi directory so the container has access
-  // to the full pi config tree (agent/, themes/, etc.)
   args.push("-v", `${config.configDir}:/home/pi-user/.pi`);
 
   // Environment file (if .env exists)
   if (config.envFile) {
     args.push("--env-file", config.envFile);
-  }
-
-  // Team packages (comma-separated list for the entrypoint to install)
-  if (config.packages.length > 0) {
-    args.push("-e", `TEAM_PACKAGES=${config.packages.join(",")}`);
   }
 
   // Port mappings (localhost only)
@@ -145,7 +143,7 @@ export function buildDockerRunArgs(config: PiContainerConfig, command: string[])
   args.push("-e", `HOST_GID=${gid}`);
 
   // Image
-  args.push(config.imageTag);
+  args.push(PI_IMAGE);
 
   // Command (pi or shell)
   args.push(...command);
@@ -158,78 +156,73 @@ export function buildDockerRunArgs(config: PiContainerConfig, command: string[])
 // Creates a temp directory with everything needed for `docker build`:
 //   - Dockerfile (generated from template)
 //   - entrypoint.sh (generated from template)
-//   - package/ (from project, or minimal placeholder)
-//   - settings/ (from project, or minimal default)
-//
-// The Dockerfile always expects these directories to exist.
-// If the project doesn't provide them, we supply fallback content.
+//   - package/ (built-in, from installed module)
+//   - settings/ (built-in, from installed module)
 
-function createBuildContext(config: PiContainerConfig): string {
+function createBuildContext(): string {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-build-"));
 
   // Generate Dockerfile
-  const dockerfile = generateDockerfile(config);
+  const dockerfile = generateDockerfile();
   fs.writeFileSync(path.join(tmpDir, "Dockerfile"), dockerfile);
 
   // Generate entrypoint
-  const entrypoint = generateEntrypoint(config);
+  const entrypoint = generateEntrypoint();
   fs.writeFileSync(path.join(tmpDir, "entrypoint.sh"), entrypoint);
 
-  // Copy team package (or create minimal placeholder)
-  // Check project root first, then .pi/
-  if (config.hasPackage) {
-    const pkgSrc = resolveSourceDir(config.projectDir, config.containerDir, "package");
-    copyDir(pkgSrc, path.join(tmpDir, "package"));
+  // Copy built-in package (always present in installed module)
+  const builtinPackageDir = path.join(MODULE_ROOT, "package");
+  if (fs.existsSync(builtinPackageDir)) {
+    copyDir(builtinPackageDir, path.join(tmpDir, "package"));
   } else {
-    // Minimal placeholder package so pi install /opt/pi-package succeeds
-    fs.mkdirSync(path.join(tmpDir, "package", "extensions"), { recursive: true });
-    fs.mkdirSync(path.join(tmpDir, "package", "themes"), { recursive: true });
-    fs.writeFileSync(path.join(tmpDir, "package", "extensions", ".gitkeep"), "");
-    fs.writeFileSync(path.join(tmpDir, "package", "themes", ".gitkeep"), "");
-    fs.writeFileSync(
-      path.join(tmpDir, "package", "package.json"),
-      JSON.stringify(
-        {
-          name: "pi-container-defaults",
-          version: "1.0.0",
-          private: true,
-          description: "No customizations",
-          keywords: ["pi-package"],
-          pi: {
-            extensions: ["./extensions"],
-            themes: ["./themes"],
-          },
-          peerDependencies: {
-            "@earendil-works/pi-coding-agent": "*",
-          },
-        },
-        null,
-        2
-      )
-    );
+    createPlaceholderPackage(tmpDir);
   }
 
-  // Copy settings (or create minimal default)
-  // Check project root first, then .pi/
-  if (config.hasSettings) {
-    const settingsSrc = resolveSourceDir(config.projectDir, config.containerDir, "settings");
-    copyDir(settingsSrc, path.join(tmpDir, "settings"));
+  // Copy built-in settings (always present in installed module)
+  const builtinSettingsDir = path.join(MODULE_ROOT, "settings");
+  if (fs.existsSync(builtinSettingsDir)) {
+    copyDir(builtinSettingsDir, path.join(tmpDir, "settings"));
   } else {
-    fs.mkdirSync(path.join(tmpDir, "settings"), { recursive: true });
-    fs.writeFileSync(
-      path.join(tmpDir, "settings", "default-settings.json"),
-      JSON.stringify({ defaultThinkingLevel: "medium", autoCompact: true }, null, 2)
-    );
+    createPlaceholderSettings(tmpDir);
   }
 
   return tmpDir;
 }
 
-/** Find a source directory — checks project root first, then .pi/. */
-function resolveSourceDir(projectDir: string, containerDir: string, name: string): string {
-  const rootPath = path.join(projectDir, name);
-  if (fs.existsSync(rootPath)) return rootPath;
-  return path.join(containerDir, name);
+function createPlaceholderPackage(tmpDir: string): void {
+  fs.mkdirSync(path.join(tmpDir, "package", "extensions"), { recursive: true });
+  fs.mkdirSync(path.join(tmpDir, "package", "themes"), { recursive: true });
+  fs.writeFileSync(path.join(tmpDir, "package", "extensions", ".gitkeep"), "");
+  fs.writeFileSync(path.join(tmpDir, "package", "themes", ".gitkeep"), "");
+  fs.writeFileSync(
+    path.join(tmpDir, "package", "package.json"),
+    JSON.stringify(
+      {
+        name: "pi-container-defaults",
+        version: "1.0.0",
+        private: true,
+        description: "No customizations",
+        keywords: ["pi-package"],
+        pi: {
+          extensions: ["./extensions"],
+          themes: ["./themes"],
+        },
+        peerDependencies: {
+          "@earendil-works/pi-coding-agent": "*",
+        },
+      },
+      null,
+      2
+    )
+  );
+}
+
+function createPlaceholderSettings(tmpDir: string): void {
+  fs.mkdirSync(path.join(tmpDir, "settings"), { recursive: true });
+  fs.writeFileSync(
+    path.join(tmpDir, "settings", "default-settings.json"),
+    JSON.stringify({ defaultThinkingLevel: "medium", autoCompact: true }, null, 2)
+  );
 }
 
 function copyDir(src: string, dst: string): void {

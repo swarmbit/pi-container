@@ -2,28 +2,23 @@
 // Tests for cli.ts — argument parsing and command dispatch
 // ============================================================
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
-
-// We test CLI behavior by running it as a child process
-// since it calls process.exit and process.argv
 import { execSync } from "child_process";
 
 const CLI_PATH = path.resolve(__dirname, "../dist/cli.js");
 
-// Helper to run CLI with a temp config dir (avoids writing to real ~/.pi)
+// Helper to run CLI with a temp home dir (avoids writing to real ~/.pi)
 function runCli(args: string, options: { cwd: string; env?: Record<string, string> }): string {
-  const tmpConfigDir = path.join(options.cwd, ".pi-config");
-  fs.mkdirSync(tmpConfigDir, { recursive: true });
+  const piDir = path.join(options.cwd, ".pi");
+  fs.mkdirSync(piDir, { recursive: true });
   const env: Record<string, string | undefined> = {
     ...process.env as Record<string, string | undefined>,
     ...options.env,
-    PI_CONFIG_DIR: tmpConfigDir,
+    HOME: options.cwd,
   };
-  // Remove HOME to prevent writing to real ~/.pi
-  delete env.HOME;
   return execSync(`node ${CLI_PATH} ${args}`, {
     encoding: "utf-8",
     cwd: options.cwd,
@@ -38,7 +33,6 @@ describe("CLI", () => {
     expect(output).toContain("build");
     expect(output).toContain("shell");
     expect(output).toContain("dry-run");
-    expect(output).toContain("PI_VERSION");
   });
 
   it("prints version with --version", () => {
@@ -64,7 +58,7 @@ describe("CLI", () => {
   it("separates pi args after --", () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-cli-test-"));
     const output = runCli("dry-run -- -p \"test\"", { cwd: tmpDir });
-    expect(output).toContain("-p");
+    expect(output).toContain("pi");
     expect(output).toContain("test");
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
@@ -84,36 +78,24 @@ describe("CLI dry-run", () => {
   it("shows configuration with no .pi", () => {
     const output = runCli("dry-run", { cwd: tmpDir });
 
-    expect(output).toContain("piVersion:");
+    expect(output).toContain("version:");
     expect(output).toContain("0.75.5");
-    expect(output).toContain("imageTag:");
+    expect(output).toContain("image:");
     expect(output).toContain("pi-agent:0.75.5");
-    expect(output).toContain("projectDir:");
-    expect(output).toContain(tmpDir);
-    expect(output).toContain("(none)"); // no containerDir, no envFile
   });
 
   it("detects .pi directory", () => {
     fs.mkdirSync(path.join(tmpDir, ".pi"));
     const output = runCli("dry-run", { cwd: tmpDir });
-
-    expect(output).toContain(tmpDir + "/.pi");
+    expect(output).toContain(".pi");
   });
 
   it("shows docker run command with correct volume mounts", () => {
     const output = runCli("dry-run", { cwd: tmpDir });
 
-    // Should mount CWD as dynamic workspace dir (named after project basename)
     const basename = path.basename(tmpDir);
-    expect(output).toContain(`${tmpDir}:/${basename}:cached`);
-    // Should mount config dir under .pi-config (our test override)
-    expect(output).toContain("/.pi-config:/home/pi-user/.pi");
-  });
-
-  it("respects PI_VERSION env var", () => {
-    const output = runCli("dry-run", { cwd: tmpDir, env: { PI_VERSION: "1.0.0" } });
-
-    expect(output).toContain("1.0.0");
+    expect(output).toContain(`/${basename}:cached`);
+    expect(output).toContain("/.pi:/home/pi-user/.pi");
   });
 
   it("shows config sources in dry-run output", () => {
@@ -133,42 +115,17 @@ describe("CLI dry-run", () => {
     expect(output).toContain(".env");
   });
 
-  it("detects package directory", () => {
-    const pkgDir = path.join(tmpDir, ".pi", "package");
-    fs.mkdirSync(pkgDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(pkgDir, "package.json"),
-      JSON.stringify({ name: "test-pkg", pi: { extensions: ["./extensions"] } })
-    );
-
-    const output = runCli("dry-run", { cwd: tmpDir });
-
-    expect(output).toContain("hasPackage");
-  });
-
-  it("detects settings directory", () => {
-    const settingsDir = path.join(tmpDir, ".pi", "settings");
-    fs.mkdirSync(settingsDir, { recursive: true });
-    fs.writeFileSync(
-      path.join(settingsDir, "default-settings.json"),
-      JSON.stringify({ theme: "github" })
-    );
-
-    const output = runCli("dry-run", { cwd: tmpDir });
-
-    expect(output).toContain("hasSettings");
-  });
-
-  it("shows packages from config.yml", () => {
+  it("shows ports from pi-container.yml", () => {
     const containerDir = path.join(tmpDir, ".pi");
     fs.mkdirSync(containerDir, { recursive: true });
     fs.writeFileSync(
-      path.join(containerDir, "config.yml"),
-      "packages:\n  - npm:@some-team/ext@1.0.0"
+      path.join(containerDir, "pi-container.yml"),
+      "ports:\n  - 3000\n  - 8080:80"
     );
 
     const output = runCli("dry-run", { cwd: tmpDir });
 
-    expect(output).toContain("npm:@some-team/ext@1.0.0");
+    expect(output).toContain("3000");
+    expect(output).toContain("8080:80");
   });
 });
