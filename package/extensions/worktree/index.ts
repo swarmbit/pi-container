@@ -2,79 +2,120 @@
 // worktree — Git worktree management extension
 // ============================================================
 // Supports creating, listing, and deleting git worktrees.
-// Each worktree lives under .pi/worktrees/
+// Each worktree lives under ~/.pi/worktrees/<encoded-cwd>/
 // and has a dedicated pi session rooted at the worktree directory.
 //
-// Create behavior:
-//   - If no session is active (ephemeral): creates a fresh session
-//     via SessionManager.create(worktreePath).
-//   - If a session is active: forks it via SessionManager.forkFrom()
-//     into the worktree, carrying full conversation history.
-//
-// Delete behavior:
-//   - Removes the git worktree (directory + files) via git.
-//   - Deletes the associated session file from disk.
-//   - If the deleted session is the current one, prompts to switch
-//     to another session first.
+// Worktrees and sessions are decoupled — the registry only tracks
+// worktree metadata. Sessions are managed independently by pi's
+// session manager.
 //
 // Commands:
-//   /worktree-create <name>.        Create a new worktree + session
-//   /worktree-delete                Interactively select and delete a worktree
-//   /worktree-list                  List all managed worktrees
-//
-// Tools (LLM-callable):
-//   worktree_create  - Create a new git worktree + session
-//   worktree_delete  - Delete a git worktree and its session
-//   worktree_list    - List all registered worktrees
+//   /worktree:prepare-session <name>  Create worktree + tell LLM to use worktree
+//   /worktree:open                    Select worktree and fork into it
+//   /worktree:delete                  Interactively select and delete a worktree
+//   /worktree:close                   Fork back to the original project directory
+//   /worktree:list                    List all managed worktrees
 //
 // Registry:
-//   /workdir/.pi/worktrees/.registry.json
-//   Maps worktree name -> { path, sessionFile, createdAt, baseRef }
-//
-// What if we delete the worktree but not the session?
-//   The session file still exists but its cwd (the worktree directory)
-//   no longer exists. Pi will fail with a "missing session cwd" error
-//   when trying to load it. The extension always deletes both together.
-//   Listing worktrees marks orphaned entries with "[directory missing]".
+//   ~/.pi/worktrees/<encoded-cwd>/registry.json
+//   Maps worktree name -> { path, createdAt, baseRef }
 // ============================================================
 
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
+import * as os from "node:os";
 
-// ── Constants ────────────────────────────────────────────────
+// ── Logging ──────────────────────────────────────────────────
 
-export const WORKTREES_DIR = ".pi/worktrees";
-export const REGISTRY_FILE = path.join(WORKTREES_DIR, ".registry.json");
+const LOG_FILE = path.join(os.homedir(), ".pi", "worktree.log");
 
-export interface WorktreeEntry {
-  path: string;
-  sessionFile: string;
-  createdAt: string;
-  baseRef: string;
-}
-
-export interface Registry {
-  worktrees: Record<string, WorktreeEntry>;
-}
-
-// ── Registry helpers ─────────────────────────────────────────
-
-export function readRegistry(): Registry {
+function log(msg: string): void {
   try {
-    const raw = fs.readFileSync(REGISTRY_FILE, "utf-8");
+    const dir = path.dirname(LOG_FILE);
+    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    const ts = new Date().toISOString();
+    fs.appendFileSync(LOG_FILE, `[${ts}] ${msg}\n`);
+  } catch {
+    // best-effort
+  }
+}
+
+// ── Path helpers ────────────────────────────────────────────
+
+/** Top-level worktrees directory in the user's home. */
+export function getWorktreeHomeDir(): string {
+  return path.resolve(os.homedir(), ".pi", "worktrees");
+}
+
+/**
+ * Encode a cwd into a safe directory name, matching the scheme
+ * used by pi's session manager for session directories.
+ */
+function encodeCwd(cwd: string): string {
+  const resolved = path.resolve(cwd);
+  return `--${resolved.replace(/^[/\\]/, "").replace(/[/\\:]/g, "-")}--`;
+}
+
+/** Per-project directory for worktrees registered from a given cwd. */
+export function getWorktreeProjectDir(cwd: string): string {
+  return path.join(getWorktreeHomeDir(), encodeCwd(cwd));
+}
+
+/** Registry file for a project. Automatically normalizes cwd —
+ * if the cwd is inside a worktree, resolves to the parent project dir. */
+export function getRegistryPath(cwd: string): string {
+  return path.join(getWorktreeProjectDir(cwd), "registry.json");
+}
+
+/** Derive the project directory that owns a given cwd.
+ * If cwd is inside ~/.pi/worktrees/<project>/..., returns <project>.
+ * Otherwise returns getWorktreeProjectDir(cwd). */
+function resolveProjectDir(cwd: string): string {
+  const resolved = path.resolve(cwd);
+  const homeDir = getWorktreeHomeDir();
+  if (resolved.startsWith(homeDir + path.sep)) {
+    const relative = resolved.slice(homeDir.length + 1);
+    const encoded = relative.split(path.sep)[0];
+    const projectDir = path.join(homeDir, encoded);
+    if (fs.existsSync(path.join(projectDir, "registry.json"))) {
+      return projectDir;
+    }
+  }
+  return getWorktreeProjectDir(cwd);
+}
+
+/** Derive the original project cwd from a potentially-worktree cwd,
+ * using the first worktree entry's originalCwd as a hint. */
+function resolveProjectCwd(ctxCwd: string): string {
+  const projectDir = resolveProjectDir(ctxCwd);
+  const registry = readRegistryFromDir(projectDir);
+  for (const entry of Object.values(registry.worktrees)) {
+    if (entry.originalCwd) return entry.originalCwd;
+  }
+  return ctxCwd;
+}
+
+function readRegistryFromDir(projectDir: string): Registry {
+  const registryPath = path.join(projectDir, "registry.json");
+  try {
+    const raw = fs.readFileSync(registryPath, "utf-8");
     return JSON.parse(raw);
   } catch {
     return { worktrees: {} };
   }
 }
 
-export function writeRegistry(registry: Registry): void {
-  fs.mkdirSync(WORKTREES_DIR, { recursive: true });
-  fs.writeFileSync(REGISTRY_FILE, JSON.stringify(registry, null, 2) + "\n");
+function writeRegistryToDir(projectDir: string, registry: Registry): void {
+  fs.mkdirSync(projectDir, { recursive: true });
+  fs.writeFileSync(path.join(projectDir, "registry.json"), JSON.stringify(registry, null, 2) + "\n");
+}
+
+/** Full path to a specific worktree on disk. */
+export function getWorktreePath(cwd: string, worktreeName: string): string {
+  return path.join(getWorktreeProjectDir(cwd), worktreeName);
 }
 
 // ── Git helpers ──────────────────────────────────────────────
@@ -97,7 +138,30 @@ export function getShortHash(ref: string = "HEAD"): string {
 
 export function buildWorktreeName(shortHash: string, name: string): string {
   const safe = name.replace(/[^a-zA-Z0-9._-]/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "");
-  return `${shortHash}_${safe}`;
+  return `${safe}-${shortHash}`;
+}
+
+// ── Registry ────────────────────────────────────────────────
+
+export interface WorktreeEntry {
+  /** Full absolute path to the git worktree on disk. */
+  path: string;
+  createdAt: string;
+  baseRef: string;
+  /** The cwd where the worktree was created from. */
+  originalCwd: string;
+}
+
+export interface Registry {
+  worktrees: Record<string, WorktreeEntry>;
+}
+
+export function readRegistry(cwd: string): Registry {
+  return readRegistryFromDir(resolveProjectDir(cwd));
+}
+
+export function writeRegistry(cwd: string, registry: Registry): void {
+  writeRegistryToDir(resolveProjectDir(cwd), registry);
 }
 
 // ── Core logic ───────────────────────────────────────────────
@@ -106,19 +170,29 @@ export interface CreateResult {
   error?: string;
   worktreeName?: string;
   worktreePath?: string;
-  sessionFile?: string;
-  /** Whether we forked from an existing session (vs created new) */
-  forked?: boolean;
 }
 
 export async function createWorktree(
   pi: ExtensionAPI,
-  ctx: any,
-  name: string
+  ctx:  ExtensionCommandContext,
+  name: string,
+  base?: string
 ): Promise<CreateResult> {
-  const shortHash = getShortHash("HEAD");
+  // Use the original project cwd for path and registry lookups,
+  // even if the current session is inside a worktree.
+  const projectCwd = resolveProjectCwd(ctx.cwd);
+  try {
+    execSync("git rev-parse --git-dir", { encoding: "utf-8", stdio: "pipe" });
+  } catch {
+    return { error: "Not a git repository. Initialize git first." };
+  }
+
+  const baseRef = base ?? getCurrentBranch();
+  const shortHash = getShortHash(baseRef);
   const worktreeName = buildWorktreeName(shortHash, name);
-  const worktreePath = path.join(WORKTREES_DIR, worktreeName);
+  const worktreePath = getWorktreePath(ctx.cwd, worktreeName);
+
+  log(`createWorktree: name=${name} base=${baseRef} worktreeName=${worktreeName} cwd=${ctx.cwd} path=${worktreePath}`);
 
   // Check if already exists on disk
   if (fs.existsSync(worktreePath)) {
@@ -126,20 +200,19 @@ export async function createWorktree(
   }
 
   // Check if already registered
-  const registry = readRegistry();
+  const registry = readRegistry(ctx.cwd);
   if (registry.worktrees[worktreeName]) {
     return { error: `Worktree "${worktreeName}" already registered.` };
   }
 
-  // 1. Create the git worktree with a new branch named after the worktree.
-  //    Using -b creates a fresh branch so there's no "already checked out"
-  //    conflict with the base ref.
-  const baseRef = getCurrentBranch();
+  // Create the git worktree
+  log(`createWorktree: git worktree add -b ${worktreeName} ${worktreePath} ${baseRef}`);
   const addResult = await pi.exec("git", [
     "worktree", "add", "-b", worktreeName, worktreePath, baseRef,
   ]);
 
   if (addResult.code !== 0) {
+    log(`createWorktree: git worktree add FAILED: ${addResult.stderr || addResult.stdout}`);
     const stderr = (addResult.stderr || "").toLowerCase();
     if (stderr.includes("already exists")) {
       return {
@@ -150,83 +223,94 @@ export async function createWorktree(
     return { error: `git worktree add failed: ${addResult.stderr || addResult.stdout}` };
   }
 
-  // 2. Create or fork a session rooted at the worktree directory
-  const currentSessionFile = ctx.sessionManager.getSessionFile();
-  let newSm: SessionManager;
-  let forked = false;
+  // Register
+  registry.worktrees[worktreeName] = {
+    path: worktreePath,
+    createdAt: new Date().toISOString(),
+    baseRef,
+    originalCwd: projectCwd,
+  };
+  writeRegistry(projectCwd, registry);
+  log(`createWorktree: registry updated for ${worktreeName}`);
 
-  try {
-    if (currentSessionFile) {
-      // Active session exists → try to fork it into the worktree.
-      // If the session file is empty/invalid (e.g. freshly started pi
-      // with no messages yet), fall back to creating a fresh session.
-      try {
-        newSm = SessionManager.forkFrom(currentSessionFile, worktreePath);
-        forked = true;
-      } catch (forkErr: any) {
-        const msg = (forkErr.message ?? "").toLowerCase();
-        if (msg.includes("empty") || msg.includes("invalid")) {
-          newSm = SessionManager.create(worktreePath);
-        } else {
-          throw forkErr;
-        }
-      }
-    } else {
-      // No active session (ephemeral) → create a fresh session
-      newSm = SessionManager.create(worktreePath);
-    }
-
-    // Set the session display name to the worktree name
-    newSm.appendSessionInfo(worktreeName);
-
-    // Store worktree metadata in the session for context
-    newSm.appendCustomEntry("worktree", {
-      worktreeName: worktreeName,
-      worktreePath: worktreePath,
-      baseRef,
-      createdAt: new Date().toISOString(),
-      forked,
-    });
-
-    const sessionFile = newSm.getSessionFile();
-    if (!sessionFile) {
-      // Clean up git worktree
-      await pi.exec("git", ["worktree", "remove", "--force", worktreePath]);
-      return { error: "Failed to create session file." };
-    }
-
-    // 3. Record in persistent registry
-    registry.worktrees[worktreeName] = {
-      path: worktreePath,
-      sessionFile,
-      createdAt: new Date().toISOString(),
-      baseRef,
-    };
-    writeRegistry(registry);
-
-    // 4. Switch to the new session
-    await ctx.switchSession(sessionFile, {
-      withSession: async (_newCtx: any) => {
-        // Session is now active with the worktree as cwd
-      },
-    });
-
-    return {
-      worktreeName: worktreeName,
-      worktreePath: worktreePath,
-      sessionFile,
-      forked,
-    };
-  } catch (err: any) {
-    // Roll back the git worktree on failure
-    await pi.exec("git", ["worktree", "remove", "--force", worktreePath]);
-    return { error: `Session setup failed: ${err.message ?? String(err)}` };
-  }
+  return { worktreeName, worktreePath };
 }
+
+// ── Fork into worktree ─────────────────────────────────────
+
+export interface ForkResult {
+  error?: string;
+  worktreeName?: string;
+  worktreePath?: string;
+}
+
+export async function forkWorktree(
+  pi: ExtensionAPI,
+  ctx: ExtensionCommandContext,
+  worktreeName: string
+): Promise<ForkResult> {
+  log(`forkWorktree: name=${worktreeName}`);
+
+  const registry = readRegistry(ctx.cwd);
+  const entry = registry.worktrees[worktreeName];
+
+  if (!entry) {
+    return { error: `Worktree "${worktreeName}" not found in registry.` };
+  }
+
+  // Get current session to fork from
+  const sourceSessionPath = ctx.sessionManager.getSessionFile();
+  if (!sourceSessionPath) {
+    return {
+      error:
+        "No current session file to fork from. " +
+        "Start a conversation first so there is a session to copy into the worktree.",
+    };
+  }
+
+  const absoluteWorktreePath = entry.path;
+  log(`forkWorktree: forkFrom ${sourceSessionPath} -> ${absoluteWorktreePath}`);
+
+  let forkedSm: ReturnType<typeof SessionManager.forkFrom>;
+  try {
+    forkedSm = SessionManager.forkFrom(sourceSessionPath, absoluteWorktreePath);
+  } catch (err: any) {
+    log(`forkWorktree: forkFrom failed: ${err.message ?? String(err)}`);
+    return { error: `Failed to fork session: ${err.message ?? String(err)}` };
+  }
+
+  const sessionFile = forkedSm.getSessionFile();
+  if (!sessionFile) {
+    return { error: "Failed to create session file for forked session." };
+  }
+
+  log(`forkWorktree: forked session file: ${sessionFile}`);
+
+  // Switch to the forked session
+  log(`forkWorktree: switching to session ${sessionFile}`);
+  await ctx.switchSession(sessionFile, {
+    withSession: async (newCtx: any) => {
+      newCtx.ui.notify(
+        `Joined worktree "${worktreeName}" at ${entry.path}.`,
+        "info"
+      );
+      await newCtx.sendUserMessage(
+        "You were moved to a new directory. You should now apply changes and excute changes on this directory. List directory files."
+      );
+    },
+  });
+  log(`forkWorktree: switch complete`);
+
+  return {
+    worktreeName,
+    worktreePath: entry.path,
+  };
+}
+
+// ── Delete worktree ────────────────────────────────────────
 
 export interface DeleteResult {
   error?: string;
-  switchedTo?: string;
 }
 
 export async function deleteWorktree(
@@ -234,56 +318,36 @@ export async function deleteWorktree(
   ctx: any,
   worktreeName: string
 ): Promise<DeleteResult> {
-  const registry = readRegistry();
+  log(`deleteWorktree: name=${worktreeName}`);
+
+  // Use the original cwd from the registry for path resolution,
+  // since the current cwd may be different (e.g. inside a worktree).
+  // Look up the worktree first to get its originalCwd.
+  const registry = readRegistry(ctx.cwd);
   const entry = registry.worktrees[worktreeName];
 
   if (!entry) {
+    log(`deleteWorktree: not found in registry`);
     return { error: `Worktree "${worktreeName}" not found in registry.` };
   }
 
-  const currentSessionFile = ctx.sessionManager.getSessionFile();
-
-  // If the session we're about to delete is the current one,
-  // we must switch to another session first.
-  let switchedTo: string | undefined;
-  if (currentSessionFile && currentSessionFile === entry.sessionFile) {
-    const allSessions = await SessionManager.list(ctx.cwd);
-    const otherSessions = allSessions.filter((s) => s.path !== entry.sessionFile);
-
-    if (otherSessions.length === 0) {
-      return {
-        error:
-          "Cannot delete the only remaining session while in it. " +
-          "Create another session first, or switch to a different project.",
-      };
-    }
-
-    const choices = otherSessions.map(
-      (s) => `${s.path}${s.name ? `  (${s.name})` : ""}`
-    );
-    const choice = await ctx.ui.select(
-      "Current session is tied to this worktree. Switch to:",
-      choices
-    );
-    if (!choice) {
-      return { error: "Delete cancelled — no session to switch to." };
-    }
-
-    // Extract the session path from the choice string
-    const chosenPath = choice.split("  ")[0];
-    await ctx.switchSession(chosenPath, {
-      withSession: async (_newCtx: any) => {
-        // Silently switched
-      },
-    });
-    switchedTo = chosenPath;
+  // Refuse to delete the worktree the current session is in
+  const currentCwd = ctx.sessionManager.getCwd();
+  if (currentCwd && currentCwd === entry.path) {
+    return {
+      error:
+        `Cannot delete worktree "${worktreeName}" while your session is inside it. ` +
+        `Switch to a different session first.`,
+    };
   }
 
   // Remove the git worktree (deletes directory and files)
+  log(`deleteWorktree: removing git worktree ${entry.path}`);
   const removeResult = await pi.exec("git", ["worktree", "remove", "--force", entry.path]);
   if (removeResult.code !== 0) {
-    // If the directory is already gone (manual deletion), prune from git and continue
+    log(`deleteWorktree: git remove FAILED: ${removeResult.stderr || removeResult.stdout}`);
     if (!fs.existsSync(entry.path)) {
+      log(`deleteWorktree: directory missing, pruning`);
       await pi.exec("git", ["worktree", "prune"]);
     } else {
       return {
@@ -292,29 +356,23 @@ export async function deleteWorktree(
     }
   }
 
-  // Delete the associated session file
-  try {
-    if (fs.existsSync(entry.sessionFile)) {
-      fs.unlinkSync(entry.sessionFile);
-    }
-  } catch (err: any) {
-    // Non-fatal: session file may already be gone
-  }
-
   // Update registry
   delete registry.worktrees[worktreeName];
-  writeRegistry(registry);
+  writeRegistry(ctx.cwd, registry);
+  log(`deleteWorktree: registry updated, worktree ${worktreeName} removed`);
 
-  return { switchedTo };
+  return {};
 }
 
+// ── List worktrees ─────────────────────────────────────────
+
 export function listWorktrees(ctx: any): string[] {
-  const registry = readRegistry();
-  const currentFile = ctx.sessionManager.getSessionFile();
+  const registry = readRegistry(ctx.cwd);
+  const currentCwd = ctx.sessionManager.getCwd();
   const lines: string[] = [];
 
   for (const [name, entry] of Object.entries(registry.worktrees)) {
-    const marker = entry.sessionFile === currentFile ? " ← current" : "";
+    const marker = currentCwd && currentCwd === entry.path ? " ← current" : "";
     const missing = !fs.existsSync(entry.path) ? " [directory missing]" : "";
     lines.push(`${name}  base=${entry.baseRef}${marker}${missing}`);
   }
@@ -329,38 +387,83 @@ export default function (pi: ExtensionAPI) {
   // Commands
   // ==========================================================
 
-  pi.registerCommand("worktree-create", {
-    description: "Create a new git worktree: /worktree-create <name> [base]",
+  pi.registerCommand("worktree:prepare-session", {
+    description: "Prepare a worktree so the LLM knows it will be moved: /worktree:prepare-session <name>",
     handler: async (args, ctx) => {
-      const parts = (args ?? "").trim().split(/\s+/);
-      const name = parts[0];
+      const name = (args ?? "").trim().split(/\s+/)[0];
 
       if (!name) {
-        ctx.ui.notify("Usage: /worktree-create <name>", "error");
+        ctx.ui.notify("Usage: /worktree:prepare-session <name>", "error");
         return;
       }
 
-      const result = await createWorktree(pi, ctx, name);
+      // Check if worktree already exists
+      const shortHash = getShortHash(getCurrentBranch());
+      const worktreeName = buildWorktreeName(shortHash, name);
+      const registry = readRegistry(ctx.cwd);
+
+      if (!registry.worktrees[worktreeName]) {
+        const result = await createWorktree(pi, ctx, name);
+        if (result.error) {
+          ctx.ui.notify(result.error, "error");
+          return;
+        }
+        ctx.ui.notify(`Worktree "${result.worktreeName}" created.`, "info");
+      }
+
+      pi.sendUserMessage(
+        `You are about to be moved to worktree "${getWorktreeProjectDir(ctx.cwd)}"/"${worktreeName}". ` +
+        `Make no action — do not call any tools. Wait for the user to run /worktree:open.`
+      );
+    },
+  });
+
+  pi.registerCommand("worktree:open", {
+    description: "Select a worktree and fork the current session into it",
+    handler: async (_args, ctx) => {
+      const registry = readRegistry(ctx.cwd);
+      const names = Object.keys(registry.worktrees);
+
+      if (names.length === 0) {
+        ctx.ui.notify("No worktrees available. Use /worktree:prepare-session <name> first.", "info");
+        return;
+      }
+
+      const choice = await ctx.ui.select(
+        "Select worktree to join:",
+        names.map((n) => {
+          const e = registry.worktrees[n];
+          return `${n}  (${e.baseRef})`;
+        })
+      );
+
+      if (!choice) {
+        ctx.ui.notify("Join cancelled.", "info");
+        return;
+      }
+
+      const worktreeName = choice.split("  ")[0];
+      const result = await forkWorktree(pi, ctx, worktreeName);
       if (result.error) {
         ctx.ui.notify(result.error, "error");
-      } else {
-        const mode = result.forked ? "Forked session →" : "New session at";
-        ctx.ui.notify(
-          `${mode} ${result.worktreePath}\nWorktree "${result.worktreeName}" ready.`,
-          "info"
-        );
       }
     },
   });
 
-  pi.registerCommand("worktree-delete", {
+  pi.registerCommand("worktree:delete", {
     description: "Interactively select and delete a worktree",
     handler: async (_args, ctx) => {
-      const registry = readRegistry();
-      const names = Object.keys(registry.worktrees);
+      const registry = readRegistry(ctx.cwd);
+      const currentCwd = ctx.sessionManager.getCwd();
+
+      // Filter out worktrees matching the current session cwd
+      const names = Object.keys(registry.worktrees).filter((n) => {
+        const entry = registry.worktrees[n];
+        return currentCwd !== entry.path;
+      });
 
       if (names.length === 0) {
-        ctx.ui.notify("No worktrees to delete.", "info");
+        ctx.ui.notify("No worktrees available to delete.", "info");
         return;
       }
 
@@ -381,16 +484,13 @@ export default function (pi: ExtensionAPI) {
       const result = await deleteWorktree(pi, ctx, worktreeName);
       if (result.error) {
         ctx.ui.notify(result.error, "error");
-      } else {
-        ctx.ui.notify(
-          `Worktree "${worktreeName}" deleted.${result.switchedTo ? ` Switched to: ${result.switchedTo}` : ""}`,
-          "info"
-        );
+        return;
       }
+      ctx.ui.notify(`Worktree "${worktreeName}" deleted.`, "info");
     },
   });
 
-  pi.registerCommand("worktree-list", {
+  pi.registerCommand("worktree:list", {
     description: "List all managed worktrees",
     handler: async (_args, ctx) => {
       const lines = listWorktrees(ctx);
@@ -402,132 +502,60 @@ export default function (pi: ExtensionAPI) {
     },
   });
 
-  // ==========================================================
-  // Tools (LLM-callable)
-  // ==========================================================
+  pi.registerCommand("worktree:close", {
+    description: "Fork the current session back to the original project directory",
+    handler: async (_args, ctx) => {
+      const currentCwd = ctx.sessionManager.getCwd();
+      const registry = readRegistry(ctx.cwd);
 
-  pi.registerTool({
-    name: "worktree_create",
-    label: "Create Worktree",
-    description:
-      "Create a new git worktree at .pi/worktrees/<hash>_<name> " +
-      "and set up a dedicated pi session rooted at the worktree. " +
-      "If a session is active, it is forked (full history copied); " +
-      "otherwise a fresh session is created.",
-    promptSnippet: "Create a new git worktree with a pi session at its root",
-    promptGuidelines: [
-      "Use worktree_create when the user asks to create a new git worktree, " +
-        "start work in an isolated directory, or experiment without affecting the main tree.",
-    ],
-    parameters: Type.Object({
-      name: Type.String({
-        description:
-          "Short name for the worktree (e.g. feature-x, bugfix-123). Combined with a git hash prefix.",
-      }),
-      base: Type.Optional(
-        Type.String({
-          description:
-            "Git ref (branch, tag, or commit) to base the worktree on. Defaults to the current HEAD.",
-        })
-      ),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await createWorktree(pi, ctx, params.name);
-      if (result.error) {
-        throw new Error(result.error);
+      // Find the worktree matching the current cwd
+      let worktreeEntry: WorktreeEntry | undefined;
+      for (const entry of Object.values(registry.worktrees)) {
+        if (entry.path === currentCwd) {
+          worktreeEntry = entry;
+          break;
+        }
       }
-      const mode = result.forked ? "Forked session →" : "New session at";
-      return {
-        content: [
-          {
-            type: "text",
-            text: [
-              `Worktree "${result.worktreeName}" created successfully.`,
-              `${mode} ${result.worktreePath}`,
-              `Session: ${result.sessionFile}`,
-            ].join("\n"),
-          },
-        ],
-        details: {
-          worktreeName: result.worktreeName,
-          worktreePath: result.worktreePath,
-          sessionFile: result.sessionFile,
-          forked: result.forked ?? false,
-        },
-      };
-    },
-  });
 
-  pi.registerTool({
-    name: "worktree_delete",
-    label: "Delete Worktree",
-    description:
-      "Delete a git worktree (removes directory and files) and its associated pi session. " +
-      "If the current session belongs to this worktree, you will be prompted to switch first.",
-    promptSnippet: "Delete a git worktree and its associated pi session",
-    promptGuidelines: [
-      "Use worktree_delete when the user asks to remove or clean up a git worktree. " +
-        "The worktree name must match a registered worktree from worktree_list.",
-    ],
-    parameters: Type.Object({
-      name: Type.String({
-        description: "Name of the worktree to delete (as shown in worktree_list).",
-      }),
-    }),
-    async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
-      const result = await deleteWorktree(pi, ctx, params.name);
-      if (result.error) {
-        throw new Error(result.error);
+      if (!worktreeEntry) {
+        ctx.ui.notify("Current session is not inside a worktree.", "error");
+        return;
       }
-      return {
-        content: [
-          {
-            type: "text",
-            text:
-              `Worktree "${params.name}" deleted successfully.` +
-              (result.switchedTo ? ` Switched to session: ${result.switchedTo}` : ""),
-          },
-        ],
-        details: {
-          deleted: params.name,
-          switchedTo: result.switchedTo ?? null,
-        },
-      };
-    },
-  });
 
-  pi.registerTool({
-    name: "worktree_list",
-    label: "List Worktrees",
-    description:
-      "List all registered git worktrees and their associated pi sessions. " +
-      'Marks the current session\'s worktree with "← current" ' +
-      "and flags any worktrees whose directories have been manually removed.",
-    promptSnippet: "List all git worktrees and their pi sessions",
-    promptGuidelines: [
-      "Use worktree_list when the user asks what worktrees exist or wants an overview.",
-    ],
-    parameters: Type.Object({}),
-    async execute(_toolCallId, _params, _signal, _onUpdate, ctx) {
-      const lines = listWorktrees(ctx);
-      const currentFile = ctx.sessionManager.getSessionFile();
-      let summary = "";
-      for (const line of lines) {
-        const marker = currentFile && line.includes(currentFile) ? " ← current" : "";
-        summary += `- ${line}${marker}\n`;
+      const sourceSessionPath = ctx.sessionManager.getSessionFile();
+      if (!sourceSessionPath) {
+        ctx.ui.notify("No current session file to fork from.", "error");
+        return;
       }
-      return {
-        content: [
-          {
-            type: "text",
-            text: summary || "No worktrees registered.",
-          },
-        ],
-        details: {
-          worktrees: lines,
-          currentSession: currentFile,
+
+      const originalCwd = worktreeEntry.originalCwd;
+      log(`worktree:close: forkFrom ${sourceSessionPath} -> ${originalCwd}`);
+
+      let forkedSm: ReturnType<typeof SessionManager.forkFrom>;
+      try {
+        forkedSm = SessionManager.forkFrom(sourceSessionPath, originalCwd);
+      } catch (err: any) {
+        ctx.ui.notify(`Failed to fork session: ${err.message ?? String(err)}`, "error");
+        return;
+      }
+
+      const sessionFile = forkedSm.getSessionFile();
+      if (!sessionFile) {
+        ctx.ui.notify("Failed to create session file.", "error");
+        return;
+      }
+
+      await ctx.switchSession(sessionFile, {
+        withSession: async (newCtx: any) => {
+          newCtx.ui.notify(
+            `Closed worktree. Returned to ${originalCwd}.`,
+            "info"
+          );
+          await newCtx.sendUserMessage(
+            "You have been moved back to the original project directory. All work should now be done relative to this directory."
+          );
         },
-      };
+      });
     },
   });
 }

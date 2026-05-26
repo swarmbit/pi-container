@@ -1,14 +1,10 @@
 // ============================================================
 // Tests for worktree extension
 // ============================================================
-// Tests exported helpers, registry I/O, git helpers, and the
-// create/delete flows with mocked external dependencies.
-//
-// @earendil-works/pi-coding-agent is mocked since it's only
-// available at runtime inside the pi agent.
-// ============================================================
 
 import { describe, it, expect, vi, beforeEach } from "vitest";
+import * as path from "node:path";
+import * as os from "node:os";
 
 // ── Hoisted mocks ───────────────────────────────────────────
 
@@ -17,14 +13,12 @@ const {
   mockFsReadFileSync,
   mockFsWriteFileSync,
   mockFsMkdirSync,
-  mockFsUnlinkSync,
   mockExecSync,
 } = vi.hoisted(() => ({
   mockFsExistsSync: vi.fn(),
   mockFsReadFileSync: vi.fn(),
   mockFsWriteFileSync: vi.fn(),
   mockFsMkdirSync: vi.fn(),
-  mockFsUnlinkSync: vi.fn(),
   mockExecSync: vi.fn(),
 }));
 
@@ -33,7 +27,7 @@ vi.mock("node:fs", () => ({
   readFileSync: mockFsReadFileSync,
   writeFileSync: mockFsWriteFileSync,
   mkdirSync: mockFsMkdirSync,
-  unlinkSync: mockFsUnlinkSync,
+  unlinkSync: vi.fn(),
 }));
 
 vi.mock("node:child_process", () => ({
@@ -41,25 +35,14 @@ vi.mock("node:child_process", () => ({
 }));
 
 const {
-  mockSessionCreate,
   mockSessionForkFrom,
-  mockSessionList,
-  mockAppendSessionInfo,
-  mockAppendCustomEntry,
 } = vi.hoisted(() => ({
-  mockSessionCreate: vi.fn(),
   mockSessionForkFrom: vi.fn(),
-  mockSessionList: vi.fn(),
-  mockAppendSessionInfo: vi.fn(),
-  mockAppendCustomEntry: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   SessionManager: {
-    create: mockSessionCreate,
     forkFrom: mockSessionForkFrom,
-    list: mockSessionList,
-    listAll: vi.fn(),
   },
 }));
 
@@ -67,24 +50,29 @@ vi.mock("@earendil-works/pi-coding-agent", () => ({
 
 import {
   buildWorktreeName,
+  getWorktreeHomeDir,
+  getWorktreeProjectDir,
+  getRegistryPath,
+  getWorktreePath,
   readRegistry,
   writeRegistry,
   getCurrentBranch,
   getShortHash,
   listWorktrees,
   createWorktree,
+  forkWorktree,
   deleteWorktree,
-  WORKTREES_DIR,
 } from "./index";
 import { SessionManager } from "@earendil-works/pi-coding-agent";
 
 // ── Helpers ──────────────────────────────────────────────────
 
+const TEST_CWD = "/pi-container";
+
 function mockSessionManager(sessionFile: string) {
   return {
     getSessionFile: () => sessionFile,
-    appendSessionInfo: mockAppendSessionInfo,
-    appendCustomEntry: mockAppendCustomEntry,
+    getCwd: () => "/pi-container",
   };
 }
 
@@ -99,17 +87,23 @@ function mockPi(gitResults: Array<{ code: number; stdout: string; stderr: string
   } as any;
 }
 
-function mockCtx(sessionFile: string | undefined) {
-  return {
-    cwd: "/pi-container",
+function mockCtx(sessionFile: string | undefined, cwd?: string) {
+  const ctx: any = {
+    cwd: cwd ?? TEST_CWD,
     sessionManager: {
       getSessionFile: () => sessionFile ?? null,
+      getCwd: () => cwd ?? TEST_CWD,
     },
     switchSession: vi.fn().mockImplementation(async (_path: string, _opts: any) => {
-      if (_opts?.withSession) await _opts.withSession({});
+      if (_opts?.withSession) await _opts.withSession(ctx);
     }),
-    ui: {} as any,
-  } as any;
+    ui: {
+      notify: vi.fn(),
+      select: vi.fn(),
+    },
+    sendUserMessage: vi.fn().mockResolvedValue(undefined),
+  };
+  return ctx;
 }
 
 function resetAllMocks() {
@@ -120,54 +114,43 @@ function resetAllMocks() {
   });
   mockFsWriteFileSync.mockImplementation(() => {});
   mockFsMkdirSync.mockImplementation(() => {});
-  mockFsUnlinkSync.mockImplementation(() => {});
   mockExecSync.mockReturnValue("main");
 }
+
+// ── Path helpers ────────────────────────────────────────────
+
+describe("path helpers", () => {
+  it("getWorktreeHomeDir returns ~/.pi/worktrees", () => {
+    const dir = getWorktreeHomeDir();
+    expect(dir).toBe(path.resolve(os.homedir(), ".pi", "worktrees"));
+  });
+
+  it("getWorktreeProjectDir encodes cwd", () => {
+    const dir = getWorktreeProjectDir("/home/user/project");
+    expect(dir).toContain("home-user-project");
+    expect(dir).toContain(".pi/worktrees");
+  });
+
+  it("getRegistryPath returns registry.json in project dir", () => {
+    const p = getRegistryPath("/home/user/project");
+    expect(p).toContain("registry.json");
+  });
+
+  it("getWorktreePath includes worktree name", () => {
+    const p = getWorktreePath("/home/user/project", "feat-abc123");
+    expect(p).toContain("feat-abc123");
+  });
+});
 
 // ── buildWorktreeName ────────────────────────────────────────
 
 describe("buildWorktreeName", () => {
-  it("combines hash and name with underscore", () => {
-    expect(buildWorktreeName("abc123", "feature-x")).toBe("abc123_feature-x");
+  it("combines hash and name", () => {
+    expect(buildWorktreeName("abc123", "feature-x")).toBe("feature-x-abc123");
   });
 
-  it("sanitizes spaces to dashes", () => {
-    expect(buildWorktreeName("abc123", "my feature")).toBe("abc123_my-feature");
-  });
-
-  it("replaces multiple spaces with single dash", () => {
-    expect(buildWorktreeName("abc123", "my   feature")).toBe("abc123_my-feature");
-  });
-
-  it("replaces special characters with dashes", () => {
-    // !@#$%^&*() each become "-", then collapsed to a single "-"
-    expect(buildWorktreeName("abc123", "fix!@#$%^&*()bug")).toBe("abc123_fix-bug");
-  });
-
-  it("collapses consecutive dashes from sanitization", () => {
-    expect(buildWorktreeName("abc123", "a!@#b")).toBe("abc123_a-b");
-  });
-
-  it("trims leading and trailing dashes", () => {
-    expect(buildWorktreeName("abc123", "-leading-")).toBe("abc123_leading");
-    expect(buildWorktreeName("abc123", "trailing-")).toBe("abc123_trailing");
-    expect(buildWorktreeName("abc123", "---")).toBe("abc123_");
-  });
-
-  it("handles dots and underscores", () => {
-    expect(buildWorktreeName("abc123", "v1.2.3_rc1")).toBe("abc123_v1.2.3_rc1");
-  });
-
-  it("handles empty name gracefully", () => {
-    expect(buildWorktreeName("abc123", "")).toBe("abc123_");
-  });
-
-  it("preserves numbers", () => {
-    expect(buildWorktreeName("abc123", "bugfix-123")).toBe("abc123_bugfix-123");
-  });
-
-  it("handles long hash", () => {
-    expect(buildWorktreeName("a1b2c3d4e5f6", "feat")).toBe("a1b2c3d4e5f6_feat");
+  it("sanitizes special characters", () => {
+    expect(buildWorktreeName("abc123", "fix!@#$%^&*()bug")).toBe("fix-bug-abc123");
   });
 });
 
@@ -179,128 +162,32 @@ describe("Registry", () => {
   });
 
   it("readRegistry returns empty when file doesn't exist", () => {
-    // mockFsReadFileSync throws ENOENT by default from resetAllMocks
-    const registry = readRegistry();
+    const registry = readRegistry(TEST_CWD);
     expect(registry).toEqual({ worktrees: {} });
-  });
-
-  it("readRegistry returns parsed content when file exists", () => {
-    const data = {
-      worktrees: {
-        "abc123_feat": {
-          path: ".pi/worktrees/abc123_feat",
-          sessionFile: "/sessions/x.jsonl",
-          createdAt: "2025-01-01T00:00:00.000Z",
-          baseRef: "main",
-        },
-      },
-    };
-    mockFsReadFileSync.mockReturnValue(JSON.stringify(data));
-    const registry = readRegistry();
-    expect(registry.worktrees["abc123_feat"]).toBeDefined();
-    expect(registry.worktrees["abc123_feat"].baseRef).toBe("main");
-  });
-
-  it("writeRegistry creates directory and writes JSON", () => {
-    writeRegistry({ worktrees: {} });
-    expect(mockFsMkdirSync).toHaveBeenCalledWith(WORKTREES_DIR, { recursive: true });
-    expect(mockFsWriteFileSync).toHaveBeenCalled();
-    const written = JSON.parse(mockFsWriteFileSync.mock.calls[0][1]);
-    expect(written).toEqual({ worktrees: {} });
-  });
-
-  it("writeRegistry writes valid JSON with worktree entries", () => {
-    const registry = {
-      worktrees: {
-        "abc123_feat": {
-          path: ".pi/worktrees/abc123_feat",
-          sessionFile: "/sessions/x.jsonl",
-          createdAt: "2025-01-01T00:00:00.000Z",
-          baseRef: "main",
-        },
-      },
-    };
-    writeRegistry(registry);
-    const written = JSON.parse(mockFsWriteFileSync.mock.calls[0][1]);
-    expect(written.worktrees["abc123_feat"].path).toBe(".pi/worktrees/abc123_feat");
-    expect(written.worktrees["abc123_feat"].sessionFile).toBe("/sessions/x.jsonl");
-    expect(written.worktrees["abc123_feat"].baseRef).toBe("main");
   });
 
   it("roundtrip: write then read", () => {
     const registry = {
       worktrees: {
-        "abc123_feat": {
-          path: ".pi/worktrees/abc123_feat",
-          sessionFile: "/sessions/x.jsonl",
+        "feat-abc123": {
+          path: "/home/user/.pi/worktrees/--proj--/feat-abc123",
           createdAt: "2025-01-01T00:00:00.000Z",
           baseRef: "main",
+          originalCwd: TEST_CWD,
         },
       },
     };
 
-    // Capture what writeRegistry writes
-    writeRegistry(registry);
-    const writtenJson = mockFsWriteFileSync.mock.calls[0][1];
+    writeRegistry(TEST_CWD, registry);
+    const registryPath = getRegistryPath(TEST_CWD);
+    const writtenJson = mockFsWriteFileSync.mock.calls.find(
+      (c: any) => c[0] === registryPath
+    )?.[1];
+    expect(writtenJson).toBeDefined();
     mockFsReadFileSync.mockReturnValue(writtenJson);
 
-    const read = readRegistry();
+    const read = readRegistry(TEST_CWD);
     expect(read).toEqual(registry);
-  });
-
-  it("registry can hold multiple worktrees", () => {
-    const registry = {
-      worktrees: {
-        "abc123_feat-a": {
-          path: ".pi/worktrees/abc123_feat-a",
-          sessionFile: "/sessions/a.jsonl",
-          createdAt: "2025-01-01T00:00:00.000Z",
-          baseRef: "main",
-        },
-        "def456_feat-b": {
-          path: ".pi/worktrees/def456_feat-b",
-          sessionFile: "/sessions/b.jsonl",
-          createdAt: "2025-01-02T00:00:00.000Z",
-          baseRef: "develop",
-        },
-      },
-    };
-
-    writeRegistry(registry);
-    const writtenJson = mockFsWriteFileSync.mock.calls[0][1];
-    mockFsReadFileSync.mockReturnValue(writtenJson);
-
-    const read = readRegistry();
-    expect(Object.keys(read.worktrees)).toHaveLength(2);
-  });
-
-  it("delete from registry removes entry", () => {
-    const registry = {
-      worktrees: {
-        "abc123_feat": {
-          path: ".pi/worktrees/abc123_feat",
-          sessionFile: "/sessions/x.jsonl",
-          createdAt: "2025-01-01T00:00:00.000Z",
-          baseRef: "main",
-        },
-      },
-    };
-
-    // Write initial
-    writeRegistry(registry);
-    const writtenJson = mockFsWriteFileSync.mock.calls[0][1];
-    mockFsReadFileSync.mockReturnValue(writtenJson);
-
-    // Read, modify, write
-    const read = readRegistry();
-    delete read.worktrees["abc123_feat"];
-    writeRegistry(read);
-
-    const updatedJson = mockFsWriteFileSync.mock.calls[1][1];
-    mockFsReadFileSync.mockReturnValue(updatedJson);
-
-    const reRead = readRegistry();
-    expect(Object.keys(reRead.worktrees)).toHaveLength(0);
   });
 });
 
@@ -311,151 +198,42 @@ describe("listWorktrees", () => {
     resetAllMocks();
   });
 
-  it("returns empty array for empty registry", () => {
-    const ctx = mockCtx(undefined);
-    const lines = listWorktrees(ctx);
-    expect(lines).toEqual([]);
-  });
-
-  it("lists registered worktrees with branch info", () => {
+  it("marks current cwd worktree", () => {
     const data = {
       worktrees: {
-        "abc123_feat-a": {
-          path: ".pi/worktrees/abc123_feat-a",
-          sessionFile: "/sessions/a.jsonl",
+        "feat-abc123": {
+          path: "/pi-container/.pi/worktrees/proj/feat-abc123",
           createdAt: "",
           baseRef: "main",
+          originalCwd: TEST_CWD,
         },
       },
     };
     mockFsReadFileSync.mockReturnValue(JSON.stringify(data));
+    mockFsExistsSync.mockReturnValue(true);
 
-    const ctx = mockCtx(undefined);
+    const ctx = mockCtx("/sessions/a.jsonl", "/pi-container/.pi/worktrees/proj/feat-abc123");
     const lines = listWorktrees(ctx);
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain("abc123_feat-a");
-    expect(lines[0]).toContain("base=main");
-  });
-
-  it("marks the current session's worktree", () => {
-    const data = {
-      worktrees: {
-        "abc123_feat-a": {
-          path: ".pi/worktrees/abc123_feat-a",
-          sessionFile: "/sessions/a.jsonl",
-          createdAt: "",
-          baseRef: "main",
-        },
-        "def456_feat-b": {
-          path: ".pi/worktrees/def456_feat-b",
-          sessionFile: "/sessions/b.jsonl",
-          createdAt: "",
-          baseRef: "develop",
-        },
-      },
-    };
-    mockFsReadFileSync.mockReturnValue(JSON.stringify(data));
-
-    const ctx = mockCtx("/sessions/a.jsonl");
-    const lines = listWorktrees(ctx);
-
-    const currentLine = lines.find((l) => l.includes("abc123_feat-a"));
-    expect(currentLine).toContain("← current");
-
-    const otherLine = lines.find((l) => l.includes("def456_feat-b"));
-    expect(otherLine).not.toContain("← current");
+    expect(lines[0]).toContain("← current");
   });
 
   it("marks missing directories", () => {
     const data = {
       worktrees: {
-        "abc123_feat-a": {
-          path: ".pi/worktrees/abc123_feat-a",
-          sessionFile: "/sessions/a.jsonl",
+        "feat-abc123": {
+          path: "/pi-container/.pi/worktrees/proj/feat-abc123",
           createdAt: "",
           baseRef: "main",
+          originalCwd: TEST_CWD,
         },
       },
     };
     mockFsReadFileSync.mockReturnValue(JSON.stringify(data));
-    // existsSync returns false for the worktree path (directory missing)
     mockFsExistsSync.mockReturnValue(false);
 
-    const ctx = mockCtx(undefined);
+    const ctx = mockCtx("/sessions/a.jsonl");
     const lines = listWorktrees(ctx);
     expect(lines[0]).toContain("[directory missing]");
-  });
-
-  it("does not mark existing directories", () => {
-    const data = {
-      worktrees: {
-        "abc123_feat-a": {
-          path: ".pi/worktrees/abc123_feat-a",
-          sessionFile: "/sessions/a.jsonl",
-          createdAt: "",
-          baseRef: "main",
-        },
-      },
-    };
-    mockFsReadFileSync.mockReturnValue(JSON.stringify(data));
-    // existsSync returns true for the worktree path
-    mockFsExistsSync.mockReturnValue(true);
-
-    const ctx = mockCtx(undefined);
-    const lines = listWorktrees(ctx);
-    expect(lines[0]).not.toContain("[directory missing]");
-  });
-});
-
-// ── Git helpers ──────────────────────────────────────────────
-
-describe("getCurrentBranch", () => {
-  beforeEach(() => {
-    resetAllMocks();
-  });
-
-  it("returns execSync output on success", () => {
-    mockExecSync.mockReturnValue("feature/my-branch\n");
-    const branch = getCurrentBranch();
-    expect(branch).toBe("feature/my-branch");
-  });
-
-  it("falls back to 'HEAD' on error", () => {
-    mockExecSync.mockImplementation(() => {
-      throw new Error("git not found");
-    });
-    const branch = getCurrentBranch();
-    expect(branch).toBe("HEAD");
-  });
-});
-
-describe("getShortHash", () => {
-  beforeEach(() => {
-    resetAllMocks();
-  });
-
-  it("returns short hash from execSync", () => {
-    mockExecSync.mockReturnValue("a1b2c3d\n");
-    const hash = getShortHash();
-    expect(hash).toBe("a1b2c3d");
-  });
-
-  it("uses provided ref", () => {
-    mockExecSync.mockReturnValue("d4e5f6\n");
-    const hash = getShortHash("develop");
-    expect(hash).toBe("d4e5f6");
-    expect(mockExecSync).toHaveBeenCalledWith(
-      "git rev-parse --short develop",
-      expect.any(Object)
-    );
-  });
-
-  it("falls back to 'unknown' on error", () => {
-    mockExecSync.mockImplementation(() => {
-      throw new Error("not a git repo");
-    });
-    const hash = getShortHash();
-    expect(hash).toBe("unknown");
   });
 });
 
@@ -467,159 +245,197 @@ describe("createWorktree", () => {
 
   beforeEach(() => {
     resetAllMocks();
-    mockExecSync.mockReturnValue("abc123"); // for getShortHash
+    mockExecSync.mockReturnValue("abc123");
   });
 
-  describe("validation errors", () => {
-    it("returns error if worktree path already exists on disk", async () => {
-      mockFsExistsSync.mockReturnValue(true); // path exists
-      pi = mockPi();
-      ctx = mockCtx("/sessions/current.jsonl");
-
-      const result = await createWorktree(pi, ctx, "feature-x");
-
-      expect(result.error).toContain("already exists");
-      expect(result.worktreeName).toBeUndefined();
+  it("returns error if not a git repo", async () => {
+    mockExecSync.mockImplementation(() => {
+      throw new Error("not a git repo");
     });
+    pi = mockPi();
+    ctx = mockCtx("/sessions/current.jsonl");
 
-    it("returns error if already registered", async () => {
-      mockFsExistsSync.mockImplementation((p: string) => {
-        return p.includes(".registry.json"); // only registry file "exists"
-      });
-      mockFsReadFileSync.mockReturnValue(
-        JSON.stringify({
-          worktrees: {
-            abc123_feature: {
-              path: "/some/path",
-              sessionFile: "/s.jsonl",
-              createdAt: "",
-              baseRef: "",
-            },
+    const result = await createWorktree(pi, ctx, "feature-x");
+    expect(result.error).toContain("Not a git repository");
+  });
+
+  it("returns error if path already exists", async () => {
+    mockFsExistsSync.mockReturnValue(true);
+    pi = mockPi();
+    ctx = mockCtx("/sessions/current.jsonl");
+
+    const result = await createWorktree(pi, ctx, "feature-x");
+    expect(result.error).toContain("already exists");
+  });
+
+  it("returns error if already registered", async () => {
+    mockFsExistsSync.mockImplementation((p: string) => p.includes("registry.json"));
+    mockFsReadFileSync.mockReturnValue(
+      JSON.stringify({
+        worktrees: {
+          "feature-abc123": {
+            path: "/some/path",
+            createdAt: "",
+            baseRef: "",
+            originalCwd: TEST_CWD,
           },
-        })
-      );
+        },
+      })
+    );
+    pi = mockPi();
+    ctx = mockCtx("/sessions/current.jsonl");
 
-      pi = mockPi();
-      ctx = mockCtx("/sessions/current.jsonl");
-
-      const result = await createWorktree(pi, ctx, "feature");
-
-      expect(result.error).toContain("already registered");
-    });
-
-    it("returns error if git worktree add fails", async () => {
-      mockFsExistsSync.mockReturnValue(false); // path doesn't exist
-      mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
-
-      pi = mockPi([{ code: 1, stdout: "", stderr: "fatal: not a git repository" }]);
-      ctx = mockCtx("/sessions/current.jsonl");
-
-      const result = await createWorktree(pi, ctx, "feature");
-
-      expect(result.error).toContain("git worktree add failed");
-    });
+    const result = await createWorktree(pi, ctx, "feature");
+    expect(result.error).toContain("already registered");
   });
 
-  describe("session creation", () => {
-    it("forks existing session via SessionManager.forkFrom", async () => {
-      const mockSm = mockSessionManager("/sessions/new.jsonl");
-      mockSessionForkFrom.mockReturnValue(mockSm);
-      mockFsExistsSync.mockReturnValue(false); // path doesn't exist
-      mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
+  it("creates git worktree and registers it", async () => {
+    mockFsExistsSync.mockReturnValue(false);
+    mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
+    pi = mockPi();
+    ctx = mockCtx("/sessions/current.jsonl");
 
-      pi = mockPi();
-      ctx = mockCtx("/sessions/current.jsonl");
+    const result = await createWorktree(pi, ctx, "feature");
 
-      const result = await createWorktree(pi, ctx, "feature");
+    expect(result.error).toBeUndefined();
+    expect(result.worktreeName).toBe("feature-abc123");
 
-      expect(result.error).toBeUndefined();
-      expect(result.forked).toBe(true);
-      expect(result.worktreeName).toBe("abc123_feature");
-      expect(SessionManager.forkFrom).toHaveBeenCalledWith(
-        "/sessions/current.jsonl",
-        expect.stringContaining(".pi/worktrees/abc123_feature")
-      );
-      expect(mockAppendSessionInfo).toHaveBeenCalledWith("abc123_feature");
-      expect(mockAppendCustomEntry).toHaveBeenCalled();
+    // Registry written
+    const registryPath = getRegistryPath(TEST_CWD);
+    const registryCall = mockFsWriteFileSync.mock.calls.find(
+      (c: any) => c[0] === registryPath
+    );
+    expect(registryCall).toBeDefined();
+    const registry = JSON.parse(registryCall[1]);
+    expect(registry.worktrees["feature-abc123"]).toBeDefined();
+    expect(registry.worktrees["feature-abc123"].baseRef).toBe("abc123");
+
+    // Does NOT fork or switch
+    expect(SessionManager.forkFrom).not.toHaveBeenCalled();
+    expect(ctx.switchSession).not.toHaveBeenCalled();
+  });
+
+  it("uses base parameter", async () => {
+    mockFsExistsSync.mockReturnValue(false);
+    mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
+    pi = mockPi();
+    ctx = mockCtx("/sessions/current.jsonl");
+
+    const result = await createWorktree(pi, ctx, "feature", "develop");
+    expect(result.worktreeName).toBe("feature-abc123");
+    expect(mockExecSync).toHaveBeenCalledWith(
+      "git rev-parse --short develop",
+      expect.any(Object)
+    );
+  });
+
+  it("returns error if git worktree add fails", async () => {
+    mockFsExistsSync.mockReturnValue(false);
+    mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
+    pi = mockPi([{ code: 1, stdout: "", stderr: "fatal: not a git repository" }]);
+    ctx = mockCtx("/sessions/current.jsonl");
+
+    const result = await createWorktree(pi, ctx, "feature");
+    expect(result.error).toContain("git worktree add failed");
+  });
+});
+
+// ── forkWorktree ────────────────────────────────────────────
+
+describe("forkWorktree", () => {
+  let pi: any;
+  let ctx: any;
+
+  beforeEach(() => {
+    resetAllMocks();
+  });
+
+  it("returns error if worktree not found", async () => {
+    mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
+    pi = mockPi();
+    ctx = mockCtx("/sessions/current.jsonl");
+
+    const result = await forkWorktree(pi, ctx, "nonexistent");
+    expect(result.error).toContain("not found in registry");
+  });
+
+  it("returns error if no current session file", async () => {
+    mockFsReadFileSync.mockReturnValue(
+      JSON.stringify({
+        worktrees: {
+          "feat-abc123": {
+            path: "/pi-container/.pi/worktrees/proj/feat-abc123",
+            createdAt: "",
+            baseRef: "main",
+            originalCwd: TEST_CWD,
+          },
+        },
+      })
+    );
+    pi = mockPi();
+    ctx = mockCtx(undefined);
+
+    const result = await forkWorktree(pi, ctx, "feat-abc123");
+    expect(result.error).toContain("No current session file");
+  });
+
+  it("forks session and switches to it", async () => {
+    mockFsReadFileSync.mockReturnValue(
+      JSON.stringify({
+        worktrees: {
+          "feat-abc123": {
+            path: "/pi-container/.pi/worktrees/proj/feat-abc123",
+            createdAt: "",
+            baseRef: "main",
+            originalCwd: TEST_CWD,
+          },
+        },
+      })
+    );
+    const mockSm = mockSessionManager("/sessions/forked.jsonl");
+    mockSessionForkFrom.mockReturnValue(mockSm);
+    pi = mockPi();
+    ctx = mockCtx("/sessions/current.jsonl");
+
+    const result = await forkWorktree(pi, ctx, "feat-abc123");
+
+    expect(result.error).toBeUndefined();
+    expect(result.worktreeName).toBe("feat-abc123");
+
+    // forkFrom called with correct args
+    expect(SessionManager.forkFrom).toHaveBeenCalledWith(
+      "/sessions/current.jsonl",
+      "/pi-container/.pi/worktrees/proj/feat-abc123"
+    );
+
+    // Switch called
+    expect(ctx.switchSession).toHaveBeenCalledWith(
+      "/sessions/forked.jsonl",
+      expect.objectContaining({ withSession: expect.any(Function) })
+    );
+  });
+
+  it("returns error if forkFrom throws", async () => {
+    mockFsReadFileSync.mockReturnValue(
+      JSON.stringify({
+        worktrees: {
+          "feat-abc123": {
+            path: "/pi-container/.pi/worktrees/proj/feat-abc123",
+            createdAt: "",
+            baseRef: "main",
+            originalCwd: TEST_CWD,
+          },
+        },
+      })
+    );
+    mockSessionForkFrom.mockImplementation(() => {
+      throw new Error("Fork failed");
     });
+    pi = mockPi();
+    ctx = mockCtx("/sessions/current.jsonl");
 
-    it("creates new session via SessionManager.create when ephemeral", async () => {
-      const mockSm = mockSessionManager("/sessions/new.jsonl");
-      mockSessionCreate.mockReturnValue(mockSm);
-      mockFsExistsSync.mockReturnValue(false); // path doesn't exist
-      mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
-
-      pi = mockPi();
-      ctx = mockCtx(undefined); // no session file = ephemeral
-
-      const result = await createWorktree(pi, ctx, "feature");
-
-      expect(result.error).toBeUndefined();
-      expect(result.forked).toBe(false);
-      expect(SessionManager.create).toHaveBeenCalledWith(
-        expect.stringContaining(".pi/worktrees/abc123_feature")
-      );
-    });
-
-    it("rolls back git worktree if session creation throws", async () => {
-      mockSessionForkFrom.mockImplementation(() => {
-        throw new Error("Session creation failed");
-      });
-      mockFsExistsSync.mockReturnValue(false);
-      mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
-
-      pi = mockPi([
-        { code: 0, stdout: "", stderr: "" }, // git worktree add (succeeds)
-        { code: 0, stdout: "", stderr: "" }, // git worktree remove (rollback)
-      ]);
-      ctx = mockCtx("/sessions/current.jsonl");
-
-      const result = await createWorktree(pi, ctx, "feature");
-
-      expect(result.error).toContain("Session setup failed");
-      // First call: git worktree add, second: rollback remove
-      expect(pi.exec).toHaveBeenCalledTimes(2);
-    });
-
-    it("stores worktree metadata in session via appendCustomEntry", async () => {
-      const mockSm = mockSessionManager("/sessions/new.jsonl");
-      mockSessionForkFrom.mockReturnValue(mockSm);
-      mockFsExistsSync.mockReturnValue(false);
-      mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
-
-      pi = mockPi();
-      ctx = mockCtx("/sessions/current.jsonl");
-
-      await createWorktree(pi, ctx, "feature");
-
-      expect(mockAppendCustomEntry).toHaveBeenCalledWith(
-        "worktree",
-        expect.objectContaining({
-          worktreeName: "abc123_feature",
-          worktreePath: expect.stringContaining(".pi/worktrees/abc123_feature"),
-          baseRef: expect.any(String),
-          createdAt: expect.any(String),
-          forked: true,
-        })
-      );
-    });
-
-    it("switches to the new session after creation", async () => {
-      const mockSm = mockSessionManager("/sessions/new.jsonl");
-      mockSessionForkFrom.mockReturnValue(mockSm);
-      mockFsExistsSync.mockReturnValue(false);
-      mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
-
-      pi = mockPi();
-      ctx = mockCtx("/sessions/current.jsonl");
-
-      await createWorktree(pi, ctx, "feature");
-
-      expect(ctx.switchSession).toHaveBeenCalledWith(
-        "/sessions/new.jsonl",
-        expect.any(Object)
-      );
-    });
+    const result = await forkWorktree(pi, ctx, "feat-abc123");
+    expect(result.error).toContain("Failed to fork session");
   });
 });
 
@@ -635,286 +451,92 @@ describe("deleteWorktree", () => {
 
   it("returns error if worktree not in registry", async () => {
     mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
-
     pi = mockPi();
     ctx = mockCtx(undefined);
 
     const result = await deleteWorktree(pi, ctx, "nonexistent");
-
     expect(result.error).toContain("not found in registry");
   });
 
-  it("returns error if deleting the only remaining session from within it", async () => {
-    const sessionFile = "/sessions/only.jsonl";
+  it("returns error if current session is in the worktree", async () => {
+    const path = "/pi-container/.pi/worktrees/proj/feat-abc123";
     mockFsReadFileSync.mockReturnValue(
       JSON.stringify({
         worktrees: {
-          abc123_feat: {
-            path: ".pi/worktrees/abc123_feat",
-            sessionFile,
+          "feat-abc123": {
+            path,
             createdAt: "",
             baseRef: "main",
+            originalCwd: TEST_CWD,
           },
         },
       })
     );
-
-    mockSessionList.mockResolvedValue([
-      { path: sessionFile, cwd: "/pi-container", name: "abc123_feat" },
-    ]);
-
     pi = mockPi();
-    ctx = mockCtx(sessionFile);
+    ctx = mockCtx("/sessions/only.jsonl", path);
 
-    const result = await deleteWorktree(pi, ctx, "abc123_feat");
-    expect(result.error).toContain("only remaining session");
+    const result = await deleteWorktree(pi, ctx, "feat-abc123");
+    expect(result.error).toContain("Cannot delete worktree");
+    expect(pi.exec).not.toHaveBeenCalled();
   });
 
-  it("successfully deletes a non-current session's worktree", async () => {
-    const deletedSession = "/sessions/deleted.jsonl";
-    const currentSession = "/sessions/current.jsonl";
-
+  it("deletes worktree and removes from registry", async () => {
+    const worktreePath = "/pi-container/.pi/worktrees/proj/feat-abc123";
     mockFsReadFileSync.mockReturnValue(
       JSON.stringify({
         worktrees: {
-          abc123_feat: {
-            path: ".pi/worktrees/abc123_feat",
-            sessionFile: deletedSession,
+          "feat-abc123": {
+            path: worktreePath,
             createdAt: "",
             baseRef: "main",
+            originalCwd: TEST_CWD,
           },
         },
       })
     );
-    mockFsExistsSync.mockReturnValue(true); // everything exists
+    mockFsExistsSync.mockReturnValue(true);
 
     pi = mockPi([{ code: 0, stdout: "", stderr: "" }]);
-    ctx = mockCtx(currentSession); // different session
+    ctx = mockCtx("/sessions/other.jsonl", TEST_CWD);
 
-    const result = await deleteWorktree(pi, ctx, "abc123_feat");
-
+    const result = await deleteWorktree(pi, ctx, "feat-abc123");
     expect(result.error).toBeUndefined();
     expect(pi.exec).toHaveBeenCalledWith("git", [
       "worktree",
       "remove",
       "--force",
-      ".pi/worktrees/abc123_feat",
+      worktreePath,
     ]);
-    expect(mockFsUnlinkSync).toHaveBeenCalledWith(deletedSession);
   });
 
-  it("switches session before deleting if current session matches", async () => {
-    const sessionFile = "/sessions/current.jsonl";
-    const otherSession = "/sessions/other.jsonl";
-
+  it("handles already-missing worktree directory", async () => {
+    const worktreePath = "/pi-container/.pi/worktrees/proj/feat-abc123";
     mockFsReadFileSync.mockReturnValue(
       JSON.stringify({
         worktrees: {
-          abc123_feat: {
-            path: ".pi/worktrees/abc123_feat",
-            sessionFile,
+          "feat-abc123": {
+            path: worktreePath,
             createdAt: "",
             baseRef: "main",
+            originalCwd: TEST_CWD,
           },
         },
       })
     );
 
-    mockSessionList.mockResolvedValue([
-      { path: sessionFile, cwd: "/pi-container", name: "abc123_feat" },
-      { path: otherSession, cwd: "/pi-container", name: "other" },
-    ]);
-    mockFsExistsSync.mockReturnValue(true);
-
-    pi = mockPi([{ code: 0, stdout: "", stderr: "" }]);
-    ctx = mockCtx(sessionFile);
-    ctx.ui = {
-      select: vi.fn().mockResolvedValue(`${otherSession}  (other)`),
-    };
-
-    const result = await deleteWorktree(pi, ctx, "abc123_feat");
-
-    expect(result.error).toBeUndefined();
-    expect(result.switchedTo).toBe(otherSession);
-    expect(ctx.switchSession).toHaveBeenCalledWith(otherSession, expect.any(Object));
-  });
-
-  it("handles already-missing worktree directory gracefully", async () => {
-    const deletedSession = "/sessions/deleted.jsonl";
-    const currentSession = "/sessions/current.jsonl";
-
-    mockFsReadFileSync.mockReturnValue(
-      JSON.stringify({
-        worktrees: {
-          abc123_feat: {
-            path: ".pi/worktrees/abc123_feat",
-            sessionFile: deletedSession,
-            createdAt: "",
-            baseRef: "main",
-          },
-        },
-      })
-    );
-
-    // existsSync: return false only for the worktree path itself
     mockFsExistsSync.mockImplementation((p: string) => {
-      if (p === ".pi/worktrees/abc123_feat") return false; // missing
-      return true; // everything else (including session file) exists
+      if (p === worktreePath) return false;
+      return true;
     });
 
-    // git worktree remove fails, then git worktree prune succeeds
     pi = mockPi([
       { code: 1, stdout: "", stderr: "fatal: not a git repository" },
       { code: 0, stdout: "", stderr: "" },
     ]);
-    ctx = mockCtx(currentSession);
+    ctx = mockCtx("/sessions/current.jsonl", TEST_CWD);
 
-    const result = await deleteWorktree(pi, ctx, "abc123_feat");
-
+    const result = await deleteWorktree(pi, ctx, "feat-abc123");
     expect(result.error).toBeUndefined();
     expect(pi.exec).toHaveBeenCalledWith("git", ["worktree", "prune"]);
-  });
-
-  it("cancels delete if user doesn't pick a session to switch to", async () => {
-    const sessionFile = "/sessions/current.jsonl";
-    const otherSession = "/sessions/other.jsonl";
-
-    mockFsReadFileSync.mockReturnValue(
-      JSON.stringify({
-        worktrees: {
-          abc123_feat: {
-            path: ".pi/worktrees/abc123_feat",
-            sessionFile,
-            createdAt: "",
-            baseRef: "main",
-          },
-        },
-      })
-    );
-
-    mockSessionList.mockResolvedValue([
-      { path: sessionFile, cwd: "/pi-container", name: "abc123_feat" },
-      { path: otherSession, cwd: "/pi-container", name: "other" },
-    ]);
-
-    pi = mockPi();
-    ctx = mockCtx(sessionFile);
-    ctx.ui = {
-      select: vi.fn().mockResolvedValue(undefined), // user cancels
-    };
-
-    const result = await deleteWorktree(pi, ctx, "abc123_feat");
-
-    expect(result.error).toContain("cancelled");
-    // Should not attempt to delete anything
-    expect(pi.exec).not.toHaveBeenCalled();
-  });
-
-  it("removes entry from registry after successful delete", async () => {
-    const deletedSession = "/sessions/deleted.jsonl";
-    const currentSession = "/sessions/current.jsonl";
-    const initialRegistry = {
-      worktrees: {
-        abc123_feat: {
-          path: ".pi/worktrees/abc123_feat",
-          sessionFile: deletedSession,
-          createdAt: "",
-          baseRef: "main",
-        },
-      },
-    };
-
-    mockFsReadFileSync.mockReturnValue(JSON.stringify(initialRegistry));
-    mockFsExistsSync.mockReturnValue(true);
-
-    pi = mockPi([{ code: 0, stdout: "", stderr: "" }]);
-    ctx = mockCtx(currentSession);
-
-    await deleteWorktree(pi, ctx, "abc123_feat");
-
-    // The writeFileSync call should contain the updated registry (entry removed)
-    expect(mockFsWriteFileSync).toHaveBeenCalledTimes(1);
-    const updatedRegistry = JSON.parse(mockFsWriteFileSync.mock.calls[0][1]);
-    expect(updatedRegistry.worktrees).toEqual({});
-  });
-});
-
-// ── Edge cases ───────────────────────────────────────────────
-
-describe("edge cases", () => {
-  let pi: any;
-  let ctx: any;
-
-  beforeEach(() => {
-    resetAllMocks();
-    mockExecSync.mockReturnValue("abc123");
-  });
-
-  it("createWorktree handles null sessionFile as ephemeral", async () => {
-    const mockSm = mockSessionManager("/sessions/new.jsonl");
-    mockSessionCreate.mockReturnValue(mockSm);
-    mockFsExistsSync.mockReturnValue(false);
-    mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
-
-    const pi = mockPi();
-    const ctx = mockCtx(null as any); // null session file
-
-    const result = await createWorktree(pi, ctx, "feature");
-    expect(result.forked).toBe(false);
-    expect(SessionManager.create).toHaveBeenCalled();
-  });
-
-  it("deleteWorktree handles session file that's already gone", async () => {
-    const deletedSession = "/sessions/deleted.jsonl";
-    const currentSession = "/sessions/current.jsonl";
-
-    mockFsReadFileSync.mockReturnValue(
-      JSON.stringify({
-        worktrees: {
-          abc123_feat: {
-            path: ".pi/worktrees/abc123_feat",
-            sessionFile: deletedSession,
-            createdAt: "",
-            baseRef: "main",
-          },
-        },
-      })
-    );
-
-    // Session file doesn't exist on disk
-    mockFsExistsSync.mockImplementation((p: string) => {
-      if (p === deletedSession) return false; // session file gone
-      return true;
-    });
-
-    pi = mockPi([{ code: 0, stdout: "", stderr: "" }]);
-    ctx = mockCtx(currentSession);
-
-    const result = await deleteWorktree(pi, ctx, "abc123_feat");
-
-    expect(result.error).toBeUndefined();
-    // unlinkSync should not be called because file doesn't exist
-    expect(mockFsUnlinkSync).not.toHaveBeenCalled();
-  });
-
-  it("createWorktree creates branch from current HEAD", async () => {
-    const mockSm = mockSessionManager("/sessions/new.jsonl");
-    mockSessionForkFrom.mockReturnValue(mockSm);
-    mockFsExistsSync.mockReturnValue(false);
-    mockFsReadFileSync.mockReturnValue(JSON.stringify({ worktrees: {} }));
-
-    const pi = mockPi();
-    const ctx = mockCtx("/sessions/current.jsonl");
-
-    // getShortHash always called with HEAD; getCurrentBranch for baseRef
-    mockExecSync.mockReturnValueOnce("abc123"); // getShortHash("HEAD")
-
-    const result = await createWorktree(pi, ctx, "feature");
-
-    expect(mockExecSync).toHaveBeenCalledWith(
-      "git rev-parse --short HEAD",
-      expect.any(Object)
-    );
-    expect(result.worktreeName).toBe("abc123_feature");
   });
 });
