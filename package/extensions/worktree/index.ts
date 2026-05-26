@@ -70,6 +70,11 @@ export function getRegistryPath(cwd: string): string {
   return path.join(getWorktreeProjectDir(cwd), "registry.json");
 }
 
+/** Check if a cwd is inside a worktree directory. */
+function isInsideWorktree(cwd: string): boolean {
+  return path.resolve(cwd).startsWith(getWorktreeHomeDir() + path.sep);
+}
+
 /** Derive the project directory that owns a given cwd.
  * If cwd is inside ~/.pi/worktrees/<project>/..., returns <project>.
  * Otherwise returns getWorktreeProjectDir(cwd). */
@@ -361,6 +366,28 @@ export async function deleteWorktree(
   writeRegistry(ctx.cwd, registry);
   log(`deleteWorktree: registry updated, worktree ${worktreeName} removed`);
 
+  // Clean up empty project directory
+  const projectDir = resolveProjectDir(ctx.cwd);
+  const remaining = Object.keys(registry.worktrees).length;
+  if (remaining === 0) {
+    try {
+      const registryPath = path.join(projectDir, "registry.json");
+      if (fs.existsSync(registryPath)) fs.unlinkSync(registryPath);
+      fs.rmdirSync(projectDir);
+      log(`deleteWorktree: removed empty project dir ${projectDir}`);
+
+      // Also remove the top-level worktrees dir if empty
+      const homeDir = getWorktreeHomeDir();
+      const homeEntries = fs.readdirSync(homeDir).filter((n) => !n.startsWith("."));
+      if (homeEntries.length === 0) {
+        fs.rmdirSync(homeDir);
+        log(`deleteWorktree: removed empty worktrees dir ${homeDir}`);
+      }
+    } catch (err: any) {
+      log(`deleteWorktree: cleanup warning: ${err.message ?? String(err)}`);
+    }
+  }
+
   return {};
 }
 
@@ -390,6 +417,11 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("worktree:prepare-session", {
     description: "Prepare a worktree so the LLM knows it will be moved: /worktree:prepare-session <name>",
     handler: async (args, ctx) => {
+      if (isInsideWorktree(ctx.cwd)) {
+        ctx.ui.notify("Cannot prepare a worktree from inside a worktree. Use /worktree:close first.", "error");
+        return;
+      }
+
       const name = (args ?? "").trim().split(/\s+/)[0];
 
       if (!name) {
@@ -412,7 +444,7 @@ export default function (pi: ExtensionAPI) {
       }
 
       pi.sendUserMessage(
-        `You are about to be moved to worktree "${getWorktreeProjectDir(ctx.cwd)}"/"${worktreeName}". ` +
+        `You are about to be moved to worktree "${getWorktreeProjectDir(ctx.cwd)}/${worktreeName}". ` +
         `Make no action — do not call any tools. Wait for the user to run /worktree:open.`
       );
     },
@@ -421,6 +453,11 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("worktree:open", {
     description: "Select a worktree and fork the current session into it",
     handler: async (_args, ctx) => {
+      if (isInsideWorktree(ctx.cwd)) {
+        ctx.ui.notify("Already in a worktree. Use /worktree:close first.", "error");
+        return;
+      }
+
       const registry = readRegistry(ctx.cwd);
       const names = Object.keys(registry.worktrees);
 
@@ -453,6 +490,11 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("worktree:delete", {
     description: "Interactively select and delete a worktree",
     handler: async (_args, ctx) => {
+      if (isInsideWorktree(ctx.cwd)) {
+        ctx.ui.notify("Cannot delete worktrees from inside a worktree. Use /worktree:close first.", "error");
+        return;
+      }
+
       const registry = readRegistry(ctx.cwd);
       const currentCwd = ctx.sessionManager.getCwd();
 
@@ -493,6 +535,11 @@ export default function (pi: ExtensionAPI) {
   pi.registerCommand("worktree:list", {
     description: "List all managed worktrees",
     handler: async (_args, ctx) => {
+      if (isInsideWorktree(ctx.cwd)) {
+        ctx.ui.notify("Cannot list worktrees from inside a worktree. Use /worktree:close first.", "error");
+        return;
+      }
+
       const lines = listWorktrees(ctx);
       if (lines.length === 0) {
         ctx.ui.notify("No worktrees registered.", "info");
