@@ -19,7 +19,7 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "prepublishOnly": "npm run build"
+    "install-app": "./install.sh"
   },
   "dependencies": {
     "js-yaml": "^4.1.0"

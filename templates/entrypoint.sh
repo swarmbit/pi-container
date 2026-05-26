@@ -35,5 +35,13 @@ fi
 # pi discovers its resources and registers the theme.
 gosu pi-user pi install /opt/pi-package
 
+# ── Set git user info from host ────────────────────────
+if [ -n "${GIT_USER_NAME}" ]; then
+  gosu pi-user git config --global user.name "${GIT_USER_NAME}"
+fi
+if [ -n "${GIT_USER_EMAIL}" ]; then
+  gosu pi-user git config --global user.email "${GIT_USER_EMAIL}"
+fi
+
 # ── Drop privileges and run command as pi-user ──────────
 exec gosu pi-user "$@"

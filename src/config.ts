@@ -110,7 +110,7 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig & Run
 
   // Dockerfile extension: project config overrides user config
   const dockerfileExtension =
-    projectConfig.dockerfileExtension ?? userConfig.dockerfileExtension;
+    (projectConfig.dockerfileExtension ?? userConfig.dockerfileExtension)?.trimEnd();
 
   return {
     ports,
