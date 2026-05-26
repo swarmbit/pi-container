@@ -14,6 +14,8 @@
 //   /worktree:open                    Select worktree and fork into it
 //   /worktree:delete                  Interactively select and delete a worktree
 //   /worktree:close                   Fork back to the original project directory
+//   /worktree:sync                    Merge base branch into the worktree
+//   /worktree:accept                  Merge worktree changes back into the base branch
 //   /worktree:list                    List all managed worktrees
 //
 // Registry:
@@ -546,6 +548,115 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       await ctx.ui.select("Worktrees:", lines);
+    },
+  });
+
+  pi.registerCommand("worktree:sync", {
+    description: "Merge the base branch into the current worktree",
+    handler: async (_args, ctx) => {
+      const currentCwd = ctx.sessionManager.getCwd();
+
+      if (!isInsideWorktree(currentCwd)) {
+        ctx.ui.notify("Not inside a worktree. Use /worktree:open first.", "error");
+        return;
+      }
+
+      const registry = readRegistry(ctx.cwd);
+
+      // Find the worktree matching the current cwd
+      let baseRef: string | undefined;
+      for (const entry of Object.values(registry.worktrees)) {
+        if (entry.path === currentCwd) {
+          baseRef = entry.baseRef;
+          break;
+        }
+      }
+
+      if (!baseRef) {
+        ctx.ui.notify("Could not find worktree entry for current session.", "error");
+        return;
+      }
+
+      log(`worktree:sync: merging ${baseRef} into current branch`);
+      const result = await pi.exec("git", ["merge", baseRef]);
+
+      if (result.code !== 0) {
+        const output = result.stderr || result.stdout || "merge failed";
+        ctx.ui.notify(`Merge failed: ${output.slice(0, 200)}`, "error");
+        return;
+      }
+
+      const msg = (result.stdout || "").trim();
+      if (msg.toLowerCase().includes("already up to date")) {
+        ctx.ui.notify(`Already up to date with ${baseRef}.`, "info");
+      } else {
+        ctx.ui.notify(`Merged ${baseRef} into current branch.`, "info");
+      }
+    },
+  });
+
+  pi.registerCommand("worktree:accept", {
+    description: "Merge worktree changes back into the base branch",
+    handler: async (_args, ctx) => {
+      const currentCwd = ctx.sessionManager.getCwd();
+
+      if (!isInsideWorktree(currentCwd)) {
+        ctx.ui.notify("Not inside a worktree. Use /worktree:open first.", "error");
+        return;
+      }
+
+      const registry = readRegistry(ctx.cwd);
+
+      // Find the worktree matching the current cwd
+      let worktreeEntry: WorktreeEntry | undefined;
+      let worktreeName: string | undefined;
+      for (const [name, entry] of Object.entries(registry.worktrees)) {
+        if (entry.path === currentCwd) {
+          worktreeEntry = entry;
+          worktreeName = name;
+          break;
+        }
+      }
+
+      if (!worktreeEntry || !worktreeName) {
+        ctx.ui.notify("Could not find worktree entry for current session.", "error");
+        return;
+      }
+
+      const originalCwd = worktreeEntry.originalCwd;
+      const baseRef = worktreeEntry.baseRef;
+
+      log(`worktree:accept: merging ${worktreeName} into ${baseRef} in ${originalCwd}`);
+
+      // Ensure the base branch is checked out in the original project
+      const branchResult = await pi.exec("git", ["-C", originalCwd, "rev-parse", "--abbrev-ref", "HEAD"]);
+      const currentBranch = (branchResult.stdout || "").trim();
+
+      if (currentBranch !== baseRef) {
+        log(`worktree:accept: ${baseRef} not checked out (current is ${currentBranch}), checking out`);
+        const checkoutResult = await pi.exec("git", ["-C", originalCwd, "checkout", baseRef]);
+        if (checkoutResult.code !== 0) {
+          const err = checkoutResult.stderr || checkoutResult.stdout || "checkout failed";
+          ctx.ui.notify(`Could not checkout ${baseRef}: ${err.slice(0, 200)}`, "error");
+          return;
+        }
+      }
+
+      // Merge the worktree branch into the base branch
+      const result = await pi.exec("git", ["-C", originalCwd, "merge", worktreeName]);
+
+      if (result.code !== 0) {
+        const output = result.stderr || result.stdout || "merge failed";
+        ctx.ui.notify(`Merge failed: ${output.slice(0, 200)}`, "error");
+        return;
+      }
+
+      const msg = (result.stdout || "").trim();
+      if (msg.toLowerCase().includes("already up to date")) {
+        ctx.ui.notify(`Already up to date with ${baseRef}.`, "info");
+      } else {
+        ctx.ui.notify(`Merged ${worktreeName} into ${baseRef}.`, "info");
+      }
     },
   });
 
