@@ -35,7 +35,7 @@ import * as os from "node:os";
 
 const LOG_FILE = path.join(os.homedir(), ".pi", "worktree.log");
 
-let _logToFile = false;
+let _logToFile = true;
 
 function log(msg: string): void {
   if (_logToFile) {
@@ -48,8 +48,7 @@ function log(msg: string): void {
       // best-effort
     }
   } else {
-    const ts = new Date().toISOString();
-    console.log(`[worktree ${ts}] ${msg}`);
+    console.log(`[worktree] ${msg}`);
   }
 }
 
@@ -315,7 +314,7 @@ export async function forkWorktree(
         "info"
       );
       await newCtx.sendUserMessage(
-        "You were moved to a new directory. You should now apply changes and excute changes on this directory. List directory files."
+        "You were moved to a new directory. You should now apply changes and excute changes on this directory. Wait for further instructions, do not execute any command now."
       );
     },
   });
@@ -740,7 +739,7 @@ export default function (pi: ExtensionAPI) {
           "info"
         );
       } else {
-        ctx.ui.notify("Worktree logging → console", "info");
+        ctx.ui.notify("Worktree logging → console (for debugging)", "info");
       }
     },
   });

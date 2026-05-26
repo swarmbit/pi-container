@@ -6,7 +6,8 @@
   "keywords": ["pi-package"],
   "pi": {
     "extensions": ["./extensions"],
-    "themes": ["./themes"]
+    "themes": ["./themes"],
+    "skills": ["./skills"]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*"
