@@ -16,6 +16,7 @@
 //   /worktree:close                   Fork back to the original project directory
 //   /worktree:sync                    Merge base branch into the worktree
 //   /worktree:accept                  Merge worktree changes back into the base branch
+//   /worktree:log                     Toggle logging to file vs console
 //   /worktree:list                    List all managed worktrees
 //
 // Registry:
@@ -34,15 +35,27 @@ import * as os from "node:os";
 
 const LOG_FILE = path.join(os.homedir(), ".pi", "worktree.log");
 
+let _logToFile = false;
+
 function log(msg: string): void {
-  try {
-    const dir = path.dirname(LOG_FILE);
-    if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  if (_logToFile) {
+    try {
+      const dir = path.dirname(LOG_FILE);
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      const ts = new Date().toISOString();
+      fs.appendFileSync(LOG_FILE, `[${ts}] ${msg}\n`);
+    } catch {
+      // best-effort
+    }
+  } else {
     const ts = new Date().toISOString();
-    fs.appendFileSync(LOG_FILE, `[${ts}] ${msg}\n`);
-  } catch {
-    // best-effort
+    console.log(`[worktree ${ts}] ${msg}`);
   }
+}
+
+/** Set whether logs go to file (true) or console (false, default). */
+export function setWorktreeLogToFile(enabled: boolean): void {
+  _logToFile = enabled;
 }
 
 // ── Path helpers ────────────────────────────────────────────
@@ -714,6 +727,21 @@ export default function (pi: ExtensionAPI) {
           );
         },
       });
+    },
+  });
+
+  pi.registerCommand("worktree:log", {
+    description: "Toggle worktree logging between console and file",
+    handler: async (_args, ctx) => {
+      _logToFile = !_logToFile;
+      if (_logToFile) {
+        ctx.ui.notify(
+          `Worktree logging → file (${LOG_FILE})`,
+          "info"
+        );
+      } else {
+        ctx.ui.notify("Worktree logging → console", "info");
+      }
     },
   });
 }
