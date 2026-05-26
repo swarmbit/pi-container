@@ -19,8 +19,7 @@
     "dev": "tsc --watch",
     "test": "vitest run",
     "test:watch": "vitest",
-    "uninstall-app": "npm uninstall -g pi-container",
-    "install-app": "npm install -g ."
+    "install-app": "./install.sh"
   },
   "dependencies": {
     "js-yaml": "^4.1.0"
