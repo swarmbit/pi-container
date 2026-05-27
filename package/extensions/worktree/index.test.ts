@@ -13,12 +13,18 @@ const {
   mockFsReadFileSync,
   mockFsWriteFileSync,
   mockFsMkdirSync,
+  mockFsUnlinkSync,
+  mockFsRmdirSync,
+  mockFsReaddirSync,
   mockExecSync,
 } = vi.hoisted(() => ({
   mockFsExistsSync: vi.fn(),
   mockFsReadFileSync: vi.fn(),
   mockFsWriteFileSync: vi.fn(),
   mockFsMkdirSync: vi.fn(),
+  mockFsUnlinkSync: vi.fn(),
+  mockFsRmdirSync: vi.fn(),
+  mockFsReaddirSync: vi.fn(),
   mockExecSync: vi.fn(),
 }));
 
@@ -27,7 +33,9 @@ vi.mock("node:fs", () => ({
   readFileSync: mockFsReadFileSync,
   writeFileSync: mockFsWriteFileSync,
   mkdirSync: mockFsMkdirSync,
-  unlinkSync: vi.fn(),
+  unlinkSync: mockFsUnlinkSync,
+  rmdirSync: mockFsRmdirSync,
+  readdirSync: mockFsReaddirSync,
 }));
 
 vi.mock("node:child_process", () => ({
@@ -36,13 +44,16 @@ vi.mock("node:child_process", () => ({
 
 const {
   mockSessionForkFrom,
+  mockSessionList,
 } = vi.hoisted(() => ({
   mockSessionForkFrom: vi.fn(),
+  mockSessionList: vi.fn(),
 }));
 
 vi.mock("@earendil-works/pi-coding-agent", () => ({
   SessionManager: {
     forkFrom: mockSessionForkFrom,
+    list: mockSessionList,
   },
 }));
 
@@ -483,6 +494,7 @@ describe("deleteWorktree", () => {
 
   beforeEach(() => {
     resetAllMocks();
+    mockSessionList.mockResolvedValue([]);
   });
 
   it("returns error if worktree not in registry", async () => {
@@ -531,12 +543,17 @@ describe("deleteWorktree", () => {
       })
     );
     mockFsExistsSync.mockReturnValue(true);
+    mockSessionList.mockResolvedValue([]);
 
-    pi = mockPi([{ code: 0, stdout: "", stderr: "" }]);
+    pi = mockPi([
+      { code: 0, stdout: "", stderr: "" },  // git worktree remove
+      { code: 0, stdout: "", stderr: "" },  // git branch -d
+    ]);
     ctx = mockCtx("/sessions/other.jsonl", TEST_CWD);
 
     const result = await deleteWorktree(pi, ctx, "feat-abc123");
     expect(result.error).toBeUndefined();
+    expect(result.deletedSessions).toBe(0);
     expect(pi.exec).toHaveBeenCalledWith("git", [
       "worktree",
       "remove",
@@ -564,6 +581,7 @@ describe("deleteWorktree", () => {
       if (p === worktreePath) return false;
       return true;
     });
+    mockSessionList.mockResolvedValue([]);
 
     pi = mockPi([
       { code: 1, stdout: "", stderr: "fatal: not a git repository" },
@@ -574,5 +592,134 @@ describe("deleteWorktree", () => {
     const result = await deleteWorktree(pi, ctx, "feat-abc123");
     expect(result.error).toBeUndefined();
     expect(pi.exec).toHaveBeenCalledWith("git", ["worktree", "prune"]);
+  });
+
+  it("deletes associated sessions by default", async () => {
+    const worktreePath = "/pi-container/.pi/worktrees/proj/feat-abc123";
+    mockFsReadFileSync.mockReturnValue(
+      JSON.stringify({
+        worktrees: {
+          "feat-abc123": {
+            path: worktreePath,
+            createdAt: "",
+            baseRef: "main",
+            originalCwd: TEST_CWD,
+          },
+        },
+      })
+    );
+    mockFsExistsSync.mockReturnValue(true);
+
+    const session1 = { path: "/home/user/.pi/agent/sessions/worktree/sess1.jsonl", cwd: worktreePath, id: "s1" };
+    const session2 = { path: "/home/user/.pi/agent/sessions/worktree/sess2.jsonl", cwd: worktreePath, id: "s2" };
+    mockSessionList.mockResolvedValue([session1, session2]);
+
+    pi = mockPi([
+      { code: 0, stdout: "", stderr: "" },  // git worktree remove
+      { code: 0, stdout: "", stderr: "" },  // git branch -d
+    ]);
+    ctx = mockCtx("/sessions/other.jsonl", TEST_CWD);
+
+    const result = await deleteWorktree(pi, ctx, "feat-abc123");
+    expect(result.error).toBeUndefined();
+    expect(result.deletedSessions).toBe(2);
+    expect(mockSessionList).toHaveBeenCalledWith(worktreePath);
+    expect(mockFsUnlinkSync).toHaveBeenCalledWith(session1.path);
+    expect(mockFsUnlinkSync).toHaveBeenCalledWith(session2.path);
+  });
+
+  it("skips session deletion when deleteSessions is false", async () => {
+    const worktreePath = "/pi-container/.pi/worktrees/proj/feat-abc123";
+    mockFsReadFileSync.mockReturnValue(
+      JSON.stringify({
+        worktrees: {
+          "feat-abc123": {
+            path: worktreePath,
+            createdAt: "",
+            baseRef: "main",
+            originalCwd: TEST_CWD,
+          },
+        },
+      })
+    );
+    mockFsExistsSync.mockReturnValue(true);
+
+    const session1 = { path: "/home/user/.pi/agent/sessions/worktree/sess1.jsonl", cwd: worktreePath, id: "s1" };
+    mockSessionList.mockResolvedValue([session1]);
+
+    pi = mockPi([
+      { code: 0, stdout: "", stderr: "" },  // git worktree remove
+      { code: 0, stdout: "", stderr: "" },  // git branch -d
+    ]);
+    ctx = mockCtx("/sessions/other.jsonl", TEST_CWD);
+
+    const result = await deleteWorktree(pi, ctx, "feat-abc123", { deleteSessions: false });
+    expect(result.error).toBeUndefined();
+    expect(result.deletedSessions).toBe(0);
+    expect(mockSessionList).not.toHaveBeenCalled();
+    // unlinkSync may be called for registry cleanup, but not for session files
+    expect(mockFsUnlinkSync).not.toHaveBeenCalledWith(session1.path);
+  });
+
+  it("handles session list failure gracefully", async () => {
+    const worktreePath = "/pi-container/.pi/worktrees/proj/feat-abc123";
+    mockFsReadFileSync.mockReturnValue(
+      JSON.stringify({
+        worktrees: {
+          "feat-abc123": {
+            path: worktreePath,
+            createdAt: "",
+            baseRef: "main",
+            originalCwd: TEST_CWD,
+          },
+        },
+      })
+    );
+    mockFsExistsSync.mockReturnValue(true);
+    mockSessionList.mockRejectedValue(new Error("listing failed"));
+
+    pi = mockPi([
+      { code: 0, stdout: "", stderr: "" },  // git worktree remove
+      { code: 0, stdout: "", stderr: "" },  // git branch -d
+    ]);
+    ctx = mockCtx("/sessions/other.jsonl", TEST_CWD);
+
+    const result = await deleteWorktree(pi, ctx, "feat-abc123");
+    expect(result.error).toBeUndefined();
+    expect(result.deletedSessions).toBe(0);
+  });
+
+  it("cleans up empty session directory after deleting sessions", async () => {
+    const worktreePath = "/pi-container/.pi/worktrees/proj/feat-abc123";
+    mockFsReadFileSync.mockReturnValue(
+      JSON.stringify({
+        worktrees: {
+          "feat-abc123": {
+            path: worktreePath,
+            createdAt: "",
+            baseRef: "main",
+            originalCwd: TEST_CWD,
+          },
+        },
+      })
+    );
+    mockFsExistsSync.mockReturnValue(true);
+
+    const sessionPath = "/home/user/.pi/agent/sessions/worktree/sess1.jsonl";
+    const sessionDir = "/home/user/.pi/agent/sessions/worktree";
+    mockSessionList.mockResolvedValue([{ path: sessionPath, cwd: worktreePath, id: "s1" }]);
+    mockFsReaddirSync.mockReturnValue([]);
+
+    pi = mockPi([
+      { code: 0, stdout: "", stderr: "" },  // git worktree remove
+      { code: 0, stdout: "", stderr: "" },  // git branch -d
+    ]);
+    ctx = mockCtx("/sessions/other.jsonl", TEST_CWD);
+
+    const result = await deleteWorktree(pi, ctx, "feat-abc123");
+    expect(result.error).toBeUndefined();
+    expect(result.deletedSessions).toBe(1);
+    expect(mockFsUnlinkSync).toHaveBeenCalledWith(sessionPath);
+    expect(mockFsRmdirSync).toHaveBeenCalledWith(sessionDir);
   });
 });

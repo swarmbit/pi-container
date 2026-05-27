@@ -23,12 +23,12 @@
 // ============================================================
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { SessionManager } from "@earendil-works/pi-coding-agent";
+import { type SessionInfo, SessionManager } from "@earendil-works/pi-coding-agent";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
 import * as os from "node:os";
-import { writeFileSync } from "node:fs";
+import { writeFileSync, unlinkSync, rmdirSync, readdirSync } from "node:fs";
 
 
 // ── Logging ──────────────────────────────────────────────────
@@ -278,14 +278,24 @@ export async function createWorktree(
 
 export interface DeleteResult {
   error?: string;
+  deletedSessions?: number;
+}
+
+export interface DeleteWorktreeOptions {
+  /** Whether to also delete sessions whose header cwd is the worktree path. Default: true. */
+  deleteSessions?: boolean;
 }
 
 export async function deleteWorktree(
   pi: ExtensionAPI,
   ctx: any,
-  worktreeName: string
+  worktreeName: string,
+  options?: DeleteWorktreeOptions
 ): Promise<DeleteResult> {
-  log(`deleteWorktree: name=${worktreeName}`);
+  const deleteSessions = options?.deleteSessions ?? true;
+  let deletedSessions = 0;
+
+  log(`deleteWorktree: name=${worktreeName} deleteSessions=${deleteSessions}`);
 
   // Use the original cwd from the registry for path resolution,
   // since the current cwd may be different (e.g. inside a worktree).
@@ -344,6 +354,39 @@ export async function deleteWorktree(
     // For other failures (e.g. branch already deleted), proceed silently
   }
 
+  // Delete sessions whose header cwd matches the worktree path
+  if (deleteSessions) {
+    try {
+      const sessions = await SessionManager.list(entry.path);
+      log(`deleteWorktree: found ${sessions.length} session(s) for worktree cwd ${entry.path}`);
+      for (const session of sessions) {
+        try {
+          unlinkSync(session.path);
+          deletedSessions++;
+          log(`deleteWorktree: deleted session ${session.path}`);
+        } catch (err: any) {
+          log(`deleteWorktree: failed to delete session ${session.path}: ${err.message ?? String(err)}`);
+        }
+      }
+
+      // Clean up empty session directory
+      try {
+        const sessionDir = path.dirname(sessions[0]?.path ?? "");
+        if (sessionDir && fs.existsSync(sessionDir)) {
+          const remaining = readdirSync(sessionDir).filter((n) => !n.startsWith("."));
+          if (remaining.length === 0) {
+            rmdirSync(sessionDir);
+            log(`deleteWorktree: removed empty session dir ${sessionDir}`);
+          }
+        }
+      } catch (err: any) {
+        log(`deleteWorktree: session dir cleanup warning: ${err.message ?? String(err)}`);
+      }
+    } catch (err: any) {
+      log(`deleteWorktree: session listing/deletion warning: ${err.message ?? String(err)}`);
+    }
+  }
+
   // Update registry
   delete registry.worktrees[worktreeName];
   writeRegistry(ctx.cwd, registry);
@@ -371,7 +414,7 @@ export async function deleteWorktree(
     }
   }
 
-  return {};
+  return { deletedSessions };
 }
 
 // ── Extension entry point ────────────────────────────────────
@@ -456,7 +499,7 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("worktree:delete", {
-    description: "Interactively select and delete a worktree",
+    description: "Interactively select and delete a worktree and associated sessions",
     handler: async (_args, ctx) => {
       if (isInsideWorktree(ctx.cwd)) {
         ctx.ui.notify("Cannot delete worktrees from inside a worktree. Use /worktree:close first.", "error");
@@ -491,12 +534,36 @@ export default function (pi: ExtensionAPI) {
       }
 
       const worktreeName = choice.split("  ")[0];
-      const result = await deleteWorktree(pi, ctx, worktreeName);
+      const entry = registry.worktrees[worktreeName];
+
+      // Check for associated sessions and ask whether to delete them
+      let deleteSessions = true;
+      if (entry) {
+        try {
+          const sessions = await SessionManager.list(entry.path);
+          if (sessions.length > 0) {
+            const sessionWord = sessions.length === 1 ? "session" : "sessions";
+            deleteSessions = await ctx.ui.confirm(
+              "Delete Associated Sessions",
+              `This worktree has ${sessions.length} ${sessionWord}. Delete them too?\n\nSelecting "No" will keep sessions but delete the worktree.`
+            );
+          }
+        } catch {
+          // If session listing fails, proceed with session deletion skipped
+          deleteSessions = false;
+        }
+      }
+
+      const result = await deleteWorktree(pi, ctx, worktreeName, { deleteSessions });
       if (result.error) {
         ctx.ui.notify(result.error, "error");
         return;
       }
-      ctx.ui.notify(`Worktree "${worktreeName}" deleted.`, "info");
+
+      const sessionMsg = result.deletedSessions
+        ? ` and ${result.deletedSessions} session(s)`
+        : "";
+      ctx.ui.notify(`Worktree "${worktreeName}" deleted${sessionMsg}.`, "info");
     },
   });
 
