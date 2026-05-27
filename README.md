@@ -15,8 +15,35 @@ Running pi in Docker ensures every team member uses the same environment — sam
 
 ## Install
 
+### From npm (recommended)
+
 ```bash
 npm install -g pi-container
+```
+
+### From source
+
+```bash
+git clone https://github.com/your-org/pi-container.git
+cd pi-container
+
+# Required dependencies:
+#   - Node.js >= 22  (runtime + TypeScript compilation)
+#   - Docker         (build and run containers)
+#   - npm            (package manager)
+
+npm install        # install TypeScript, vitest, and runtime deps
+npm run build      # compile TypeScript → dist/
+
+# Run directly (during development):
+node dist/cli.js
+
+# Or install globally from the local checkout:
+npm install -g .
+pi-container build
+
+# Alternatively, use the quick-install script:
+./install.sh       # build, uninstall old, install globally, build image
 ```
 
 ## Usage
@@ -35,7 +62,8 @@ pi-container -p 8080:3000        # host 8080 → container 3000
 
 # Management:
 pi-container build              # build/rebuild the image
-pi-container shell              # open a shell in the container
+pi-container shell              # open a shell in a new container
+pi-container shell <id>         # exec into an existing container
 pi-container dry-run            # print config and docker commands (debugging)
 ```
 
@@ -86,90 +114,139 @@ Each invocation creates a fresh container. Multiple instances can run simultaneo
 
 ## Configuration
 
-The only configurable setting is **ports**. Pi version and image are determined by the pi-container npm package you have installed.
+Pi-container reads config from two files (both in YAML format) and CLI flags. All settings are optional — zero config works out of the box.
 
-### Zero config
+### Config files
 
-Run `pi-container` from any directory. No configuration needed.
+| File | Purpose | Committed? |
+|------|---------|------------|
+| `.pi/pi-container.yml` | Project-level defaults (team-shared) | Yes |
+| `~/.pi/pi-container.yml` | Personal overrides (all projects) | No |
 
-### Port forwarding
+### Precedence (highest wins)
 
-Expose container ports so you can access web apps from your host machine:
+1. CLI flags (`-p`, `--port`, `--privileged`, `--docker-socket`)
+2. User config (`~/.pi/pi-container.yml`)
+3. Project config (`.pi/pi-container.yml`)
+
+For `env`, user keys override project keys with the same name; project-only keys are preserved.
+
+---
+
+### Full config reference
+
+Here is every supported key in a `pi-container.yml` file:
+
+```yaml
+# ── Ports ──────────────────────────────────────────────────
+# Expose container ports on localhost so you can access web
+# apps running inside the container (dev servers, Storybook,
+# etc.) from your browser. All formats supported:
+ports:
+  - 3000            # localhost:3000 → container:3000
+  - 8080:80         # localhost:8080 → container:80
+  - 9000-9010       # port range — expands to 11 entries
+
+# ── Environment variables ──────────────────────────────────
+# Inject environment variables into the container at runtime.
+# Useful for passing API keys, feature flags, or other config
+# that pi or your project needs. These are set via docker -e.
+env:
+  CUSTOM_VAR: some-value
+  NODE_ENV: development
+
+# ── Privileged mode (Docker-out-of-Docker) ─────────────────
+# Mounts the host Docker socket into the container so pi can
+# build and run Docker images from inside the container.
+# Docker CLI is pre-installed in the image — enable this only
+# if your workflow requires pi to interact with Docker.
+privileged: true
+
+# ── Docker socket path ─────────────────────────────────────
+# Override the default Docker socket path on the host. Only
+# applies when privileged mode is enabled. Use this if your
+# Docker daemon listens on a non-standard socket.
+dockerSocket: /var/run/docker.sock   # default
+
+# ── Dockerfile extension ───────────────────────────────────
+# Inject extra RUN / COPY / ENV steps into the Docker image
+# at build time. Use this to install system packages or tools
+# that pi needs (python3, ffmpeg, etc.). After changing this,
+# rebuild the image with `pi-container build`.
+dockerfileExtension: |
+  RUN apt-get update && apt-get install -y python3 pip
+  ENV PYTHONUNBUFFERED=1
+```
+
+> **Important:** After changing `dockerfileExtension` or updating pi-container,
+> you must rebuild the image with `pi-container build`. The image is not
+> rebuilt automatically on each run — it's only built when it doesn't exist yet.
+
+### Settings reference
+
+| Key | Type | Default | Description |
+|-----|------|---------|-------------|
+| `ports` | `list` | `[]` | Container ports to expose on `127.0.0.1`. Accepts simple ports (`3000`), host:container mappings (`8080:80`), and ranges (`9000-9010`). Useful for dev servers, Storybook, etc. |
+| `env` | `map` | `{}` | Key-value pairs injected as environment variables into the container via `docker run -e`. User config overrides project config per-key. |
+| `privileged` | `bool` | `false` | When `true`, mounts the host Docker socket (`/var/run/docker.sock`) into the container so pi can run Docker commands (build images, start containers). Docker CLI is already installed in the image. |
+| `dockerSocket` | `string` | `/var/run/docker.sock` | Host path to the Docker socket. Only used when `privileged: true`. Change this if your Docker daemon uses a non-standard socket path. |
+| `dockerfileExtension` | `string` | — | Arbitrary Dockerfile content appended during `pi-container build`. Use it to install extra system packages (`python3`, `ffmpeg`, etc.) or set image-level `ENV` vars. Requires a manual rebuild to take effect. |
+
+### CLI flags
+
+| Flag | Description |
+|------|-------------|
+| `-p`, `--port PORT` | Publish a container port on localhost (repeatable). Formats: `3000` or `8080:3000`. Port ranges are not supported via CLI — use the config file. |
+| `--privileged` | Enable privileged mode (mount Docker socket). Equivalent to `privileged: true` in config. |
+| `--docker-socket PATH` | Override the host Docker socket path. Equivalent to `dockerSocket` in config. |
+| `--debug`, `-d` | Enable debug logging. Prints resolved config, docker commands, and container output to stderr. |
+
+### Commands
+
+| Command | Description |
+|---------|-------------|
+| *(default)* | Run pi interactively in a new container |
+| `build` | Build or rebuild the Docker image. Run this after changing `dockerfileExtension` or updating pi-container. |
+| `shell` | Open a bash shell in a new container (useful for debugging or running arbitrary commands) |
+| `shell <id>` | Exec into an existing running container by ID or name. The container must be running and must have been created by pi-container. |
+| `dry-run` | Print the resolved config and the docker commands that would run, without executing anything. Useful for debugging config resolution. |
+
+### Port details
+
+All ports bind to `127.0.0.1` (localhost only) for security. Ranges (`9000-9010`) are supported in config files but not via CLI flags. If a host port is already in use, `pi-container` will report the conflict and exit.
+
+### Example: full project config
+
+```yaml
+# .pi/pi-container.yml — committed to git, shared by the team
+ports:
+  - 3000            # Next.js dev server
+  - 6006            # Storybook
+  - 8080:80         # Reverse proxy
+
+env:
+  NODE_ENV: development
+  CUSTOM_API_URL: https://api.example.com
+
+dockerfileExtension: |
+  RUN apt-get update && apt-get install -y python3
+```
+
+After adding `dockerfileExtension`, rebuild the image:
 
 ```bash
-# CLI flag
-pi-container -p 3000                # localhost:3000 → container:3000
-pi-container -p 8080:3000           # localhost:8080 → container:3000
-pi-container -p 3000 -p 6006       # multiple ports
-
-# Config file — .pi/pi-container.yml
-ports:
-  - 3000
-  - 6006
-  - 8080:80
-
-# Config file — ~/.pi/pi-container.yml
-ports:
-  - 3000
+pi-container build
 ```
 
-All ports bind to `127.0.0.1` (localhost only) for security. If a host port is already in use, `pi-container` will report the conflict and exit.
-
-### Project config: `.pi/pi-container.yml`
-
-Place a `.pi/` directory in your project root for team-shared port configuration:
+### Example: personal override
 
 ```yaml
-# .pi/pi-container.yml
+# ~/.pi/pi-container.yml — not committed, personal overrides
 ports:
-  - 3000        # dev server
-  - 6006        # storybook
-  - 8080:80     # host 8080 → container 80
-```
+  - 3000            # also expose port 3000 everywhere
 
-This file is committed to git — it's for team defaults.
-
-### User config: `~/.pi/pi-container.yml`
-
-For personal port overrides that apply across all projects:
-
-```yaml
-# ~/.pi/pi-container.yml
-ports:
-  - 3000
-```
-
-This file is not committed to git — it's for individual user preferences.
-
-### Config precedence for ports (highest wins)
-
-1. CLI flags (`-p`, `--port`)
-2. User config (`~/.pi/pi-container.yml`) — personal, not committed
-3. Project config (`.pi/pi-container.yml`) — team, committed to git
-
-### Environment variables
-
-Pass environment variables (like API keys) to the container via `env` in your config file:
-
-```yaml
-# .pi/pi-container.yml
 env:
-  CUSTOM_ENV: sk-xxx
-```
-
-User config overrides project config for the same key, and project-only keys are preserved:
-
-```yaml
-# .pi/pi-container.yml (project)
-env:
-  CUSTOM_ENV: sk-team-key
-  PROJECT_VAR: value
-
-# ~/.pi/pi-container.yml (user)
-env:
-  CUSTOM_ENV: sk-personal-key
-
-# Result: CUSTOM_ENV=sk-personal-key, PROJECT_VAR=value
+  CUSTOM_VAR: personal-value
 ```
 
 ## Multiple instances
