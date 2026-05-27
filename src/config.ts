@@ -17,6 +17,7 @@
 //   env:
 //     ANTHROPIC_API_KEY: sk-xxx
 //   privileged: true  # mount docker socket + install Docker CLI
+//   dockerSocket: /var/run/docker.sock  # custom socket path
 // ============================================================
 
 import * as path from "path";
@@ -30,6 +31,9 @@ export const PI_VERSION = "0.75.5";
 
 /** Docker image tag derived from the pi version. */
 export const PI_IMAGE = `pi-agent:${PI_VERSION}`;
+
+/** Default host path to the Docker socket. */
+export const DEFAULT_DOCKER_SOCKET = "/var/run/docker.sock";
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -45,8 +49,10 @@ export interface PiContainerConfig {
   ports: PortMapping[];
   env: Record<string, string>;
   dockerfileExtension?: string;
-  /** Mount /var/run/docker.sock into the container and install Docker CLI in the image. */
+  /** Mount docker socket into the container and install Docker CLI in the image. */
   privileged: boolean;
+  /** Host path to the Docker socket (default: /var/run/docker.sock). */
+  dockerSocket: string;
 }
 
 /** Runtime context (derived from environment, not user-configurable). */
@@ -64,6 +70,8 @@ export interface LoadConfigOptions {
   cliPorts?: string[];
   /** Privileged mode from CLI (highest precedence). */
   cliPrivileged?: boolean;
+  /** Docker socket path from CLI (highest precedence). */
+  cliDockerSocket?: string;
 }
 
 // ── Config file schema ────────────────────────────────────────
@@ -73,6 +81,7 @@ interface ConfigFile {
   env?: Record<string, string>;
   dockerfileExtension?: string;
   privileged?: boolean;
+  dockerSocket?: string;
 }
 
 // ── Loading ────────────────────────────────────────────────────
@@ -125,11 +134,19 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig & Run
     userConfig.privileged ??
     false;
 
+  // Docker socket path: CLI > project config > user config > default
+  const dockerSocket: string =
+    options?.cliDockerSocket ??
+    projectConfig.dockerSocket ??
+    userConfig.dockerSocket ??
+    DEFAULT_DOCKER_SOCKET;
+
   return {
     ports,
     env,
     dockerfileExtension,
     privileged,
+    dockerSocket,
     configDir,
     containerDir,
     projectDir,

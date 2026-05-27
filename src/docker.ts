@@ -144,7 +144,7 @@ export function buildDockerRunArgs(config: PiContainerConfig & RuntimeContext, c
 
   // Docker socket mount for privileged mode (Docker-out-of-Docker)
   if (config.privileged) {
-    args.push("-v", "/var/run/docker.sock:/var/run/docker.sock");
+    args.push("-v", `${config.dockerSocket}:/var/run/docker.sock`);
   }
 
   // Image

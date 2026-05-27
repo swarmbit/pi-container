@@ -120,6 +120,17 @@ describe("CLI dry-run", () => {
     expect(output).toContain("sk-test");
   });
 
+  it("shows dockerSocket in dry-run", () => {
+    const output = runCli("dry-run", { cwd: tmpDir });
+    expect(output).toContain("dockerSocket:");
+    expect(output).toContain("/var/run/docker.sock");
+  });
+
+  it("shows cliDockerSocket in dry-run", () => {
+    const output = runCli("dry-run --docker-socket /custom/sock", { cwd: tmpDir });
+    expect(output).toContain("/custom/sock");
+  });
+
   it("shows ports from pi-container.yml", () => {
     const containerDir = path.join(tmpDir, ".pi");
     fs.mkdirSync(containerDir, { recursive: true });

@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
-import { loadConfig, getUserConfigPath, parsePortMapping, parsePortsString, PI_VERSION, PI_IMAGE } from "./config";
+import { loadConfig, getUserConfigPath, parsePortMapping, parsePortsString, PI_VERSION, PI_IMAGE, DEFAULT_DOCKER_SOCKET } from "./config";
 
 let tmpDir: string;
 let origCwd: string;
@@ -35,6 +35,7 @@ describe("PI_VERSION and PI_IMAGE constants", () => {
     const config = loadConfig({ homeDir: tmpDir });
     // Config no longer has version/image — they're constants
     expect(config.ports).toEqual([]);
+    expect(config.dockerSocket).toBe(DEFAULT_DOCKER_SOCKET);
   });
 });
 
@@ -264,6 +265,86 @@ describe("loadConfig", () => {
       process.chdir(tmpDir);
       const config = loadConfig({ homeDir: tmpDir, cliPrivileged: false });
       expect(config.privileged).toBe(false);
+    });
+
+    // ── dockerSocket ──────────────────────────────────────
+
+    it("dockerSocket defaults to /var/run/docker.sock", () => {
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir: tmpDir });
+      expect(config.dockerSocket).toBe(DEFAULT_DOCKER_SOCKET);
+    });
+
+    it("reads dockerSocket from project config", () => {
+      const containerDir = path.join(tmpDir, ".pi");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "pi-container.yml"),
+        "dockerSocket: /run/docker.sock"
+      );
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir: tmpDir });
+      expect(config.dockerSocket).toBe("/run/docker.sock");
+    });
+
+    it("reads dockerSocket from user config", () => {
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-home-"));
+      fs.mkdirSync(path.join(homeDir, ".pi"), { recursive: true });
+      fs.writeFileSync(
+        path.join(homeDir, ".pi", "pi-container.yml"),
+        "dockerSocket: /custom/docker.sock"
+      );
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir });
+      expect(config.dockerSocket).toBe("/custom/docker.sock");
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    });
+
+    it("project dockerSocket overrides user", () => {
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-home-"));
+      fs.mkdirSync(path.join(homeDir, ".pi"), { recursive: true });
+      fs.writeFileSync(
+        path.join(homeDir, ".pi", "pi-container.yml"),
+        "dockerSocket: /user/socket"
+      );
+
+      const containerDir = path.join(tmpDir, ".pi");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "pi-container.yml"),
+        "dockerSocket: /project/socket"
+      );
+
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir });
+      expect(config.dockerSocket).toBe("/project/socket");
+
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    });
+
+    it("CLI dockerSocket overrides config", () => {
+      const containerDir = path.join(tmpDir, ".pi");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "pi-container.yml"),
+        "dockerSocket: /project/socket"
+      );
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir: tmpDir, cliDockerSocket: "/cli/socket" });
+      expect(config.dockerSocket).toBe("/cli/socket");
+    });
+
+    it("dockerSocket works independently of privileged", () => {
+      const containerDir = path.join(tmpDir, ".pi");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "pi-container.yml"),
+        "privileged: false\ndockerSocket: /custom/docker.sock"
+      );
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir: tmpDir });
+      expect(config.privileged).toBe(false);
+      expect(config.dockerSocket).toBe("/custom/docker.sock");
     });
   });
 
