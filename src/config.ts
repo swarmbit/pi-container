@@ -16,6 +16,7 @@
 //     - 8080:80
 //   env:
 //     ANTHROPIC_API_KEY: sk-xxx
+//   privileged: true  # mount docker socket + install Docker CLI
 // ============================================================
 
 import * as path from "path";
@@ -44,6 +45,8 @@ export interface PiContainerConfig {
   ports: PortMapping[];
   env: Record<string, string>;
   dockerfileExtension?: string;
+  /** Mount /var/run/docker.sock into the container and install Docker CLI in the image. */
+  privileged: boolean;
 }
 
 /** Runtime context (derived from environment, not user-configurable). */
@@ -59,6 +62,8 @@ export interface LoadConfigOptions {
   homeDir?: string;
   /** Port mappings from CLI -p flags (highest precedence). */
   cliPorts?: string[];
+  /** Privileged mode from CLI (highest precedence). */
+  cliPrivileged?: boolean;
 }
 
 // ── Config file schema ────────────────────────────────────────
@@ -67,6 +72,7 @@ interface ConfigFile {
   ports?: (number | string)[];
   env?: Record<string, string>;
   dockerfileExtension?: string;
+  privileged?: boolean;
 }
 
 // ── Loading ────────────────────────────────────────────────────
@@ -112,10 +118,18 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig & Run
   const dockerfileExtension =
     (projectConfig.dockerfileExtension ?? userConfig.dockerfileExtension)?.trimEnd();
 
+  // Privileged mode: CLI > project config > user config
+  const privileged: boolean =
+    options?.cliPrivileged ??
+    projectConfig.privileged ??
+    userConfig.privileged ??
+    false;
+
   return {
     ports,
     env,
     dockerfileExtension,
+    privileged,
     configDir,
     containerDir,
     projectDir,

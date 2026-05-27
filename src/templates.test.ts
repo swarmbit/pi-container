@@ -92,6 +92,30 @@ describe("generateDockerfile", () => {
     expect(argLines[0]).toBe(`ARG PI_VERSION=${PI_VERSION}`);
     expect(argLines[1]).toBe(`ARG PI_VERSION=${PI_VERSION}`);
   });
+
+  it("includes Docker CLI installation when privileged is true", () => {
+    const df = generateDockerfile(undefined, true);
+    expect(df).toContain("Install Docker CLI for container-in-container");
+    expect(df).toContain("docker.io");
+  });
+
+  it("does not include Docker CLI when privileged is false", () => {
+    const df = generateDockerfile(undefined, false);
+    expect(df).not.toContain("docker.io");
+    expect(df).not.toContain("Install Docker CLI for container-in-container");
+  });
+
+  it("does not include Docker CLI when privileged is not passed (defaults)", () => {
+    const df = generateDockerfile();
+    expect(df).not.toContain("docker.io");
+  });
+
+  it("includes both extension and Docker CLI when both are provided", () => {
+    const df = generateDockerfile("RUN echo extension", true);
+    expect(df).toContain("docker.io");
+    expect(df).toContain("Extension from .pi/pi-container.yml");
+    expect(df).toContain("RUN echo extension");
+  });
 });
 
 describe("generateEntrypoint", () => {

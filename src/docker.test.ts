@@ -14,6 +14,7 @@ function makeConfig(overrides: Partial<PiContainerConfig> = {}): PiContainerConf
   return {
     ports: [],
     env: {},
+    privileged: false,
     ...overrides,
   };
 }
@@ -30,6 +31,7 @@ function makeFullConfig(overrides: Partial<FullConfig> = {}): FullConfig {
   return {
     ports: [],
     env: {},
+    privileged: false,
     configDir: "/home/user/.pi",
     containerDir: "",
     projectDir: "/project",
@@ -202,6 +204,33 @@ describe("buildDockerRunArgs", () => {
 
     const teamPackagesEntry = args.find((a) => a.startsWith("TEAM_PACKAGES="));
     expect(teamPackagesEntry).toBeUndefined();
+  });
+
+  it("mounts docker socket when privileged is true", () => {
+    const config = makeFullConfig({ privileged: true });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    // Should have -v for the socket mount
+    const socketMount = args.indexOf("/var/run/docker.sock:/var/run/docker.sock");
+    expect(socketMount).toBeGreaterThan(-1);
+    // Should be preceded by -v
+    expect(args[socketMount - 1]).toBe("-v");
+  });
+
+  it("does not mount docker socket when privileged is false", () => {
+    const config = makeFullConfig({ privileged: false });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const socketMount = args.indexOf("/var/run/docker.sock:/var/run/docker.sock");
+    expect(socketMount).toBe(-1);
+  });
+
+  it("does not mount docker socket when privileged is default (false)", () => {
+    const config = makeFullConfig();
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const socketMount = args.indexOf("/var/run/docker.sock:/var/run/docker.sock");
+    expect(socketMount).toBe(-1);
   });
 });
 

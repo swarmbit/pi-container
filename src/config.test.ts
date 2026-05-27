@@ -188,6 +188,83 @@ describe("loadConfig", () => {
       const config = loadConfig({ homeDir: tmpDir });
       expect(config.ports).toEqual([]);
     });
+
+    it("privileged defaults to false when not configured", () => {
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir: tmpDir });
+      expect(config.privileged).toBe(false);
+    });
+
+    it("reads privileged from project config", () => {
+      const containerDir = path.join(tmpDir, ".pi");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "pi-container.yml"),
+        "privileged: true"
+      );
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir: tmpDir });
+      expect(config.privileged).toBe(true);
+    });
+
+    it("reads privileged from user config", () => {
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-home-"));
+      fs.mkdirSync(path.join(homeDir, ".pi"), { recursive: true });
+      fs.writeFileSync(
+        path.join(homeDir, ".pi", "pi-container.yml"),
+        "privileged: true"
+      );
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir });
+      expect(config.privileged).toBe(true);
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    });
+
+    it("project privileged overrides user privileged when both set", () => {
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-home-"));
+      fs.mkdirSync(path.join(homeDir, ".pi"), { recursive: true });
+      fs.writeFileSync(
+        path.join(homeDir, ".pi", "pi-container.yml"),
+        "privileged: false"
+      );
+
+      const containerDir = path.join(tmpDir, ".pi");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "pi-container.yml"),
+        "privileged: true"
+      );
+
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir });
+      expect(config.privileged).toBe(true);
+
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    });
+
+    it("CLI privileged overrides config", () => {
+      const containerDir = path.join(tmpDir, ".pi");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "pi-container.yml"),
+        "privileged: false"
+      );
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir: tmpDir, cliPrivileged: true });
+      expect(config.privileged).toBe(true);
+    });
+
+    it("CLI privileged false overrides config true", () => {
+      const containerDir = path.join(tmpDir, ".pi");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "pi-container.yml"),
+        "privileged: true"
+      );
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir: tmpDir, cliPrivileged: false });
+      expect(config.privileged).toBe(false);
+    });
   });
 
   // ── Port parsing tests ──────────────────────────────────────────

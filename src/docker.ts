@@ -34,10 +34,10 @@ export function imageExists(tag: string): boolean {
 
 // ── Build ───────────────────────────────────────────────────
 
-export function buildImage(dockerfileExtension?: string): void {
+export function buildImage(dockerfileExtension?: string, privileged?: boolean): void {
   console.log(`🔨 Building ${PI_IMAGE} (pi v${PI_VERSION})...`);
 
-  const buildCtx = createBuildContext(dockerfileExtension);
+  const buildCtx = createBuildContext(dockerfileExtension, privileged);
 
   try {
     const args = [
@@ -65,17 +65,17 @@ export function buildImage(dockerfileExtension?: string): void {
   }
 }
 
-export function buildIfNeeded(dockerfileExtension?: string): void {
+export function buildIfNeeded(dockerfileExtension?: string, privileged?: boolean): void {
   if (!imageExists(PI_IMAGE)) {
     console.log("📦 Image not found. Building...");
-    buildImage(dockerfileExtension);
+    buildImage(dockerfileExtension, privileged);
   }
 }
 
 // ── Run ─────────────────────────────────────────────────────
 
 export function runContainer(config: PiContainerConfig & RuntimeContext, piArgs: string[]): void {
-  buildIfNeeded(config.dockerfileExtension);
+  buildIfNeeded(config.dockerfileExtension, config.privileged);
 
   const args = buildDockerRunArgs(config, piArgs);
   const result = spawnSync("docker", args, { stdio: "inherit" });
@@ -88,7 +88,7 @@ export function runContainer(config: PiContainerConfig & RuntimeContext, piArgs:
 // ── Shell ───────────────────────────────────────────────────
 
 export function shellInContainer(config: PiContainerConfig & RuntimeContext): void {
-  buildIfNeeded(config.dockerfileExtension);
+  buildIfNeeded(config.dockerfileExtension, config.privileged);
 
   console.log("🐚 Opening shell in pi container...");
   const args = buildDockerRunArgs(config, ["/bin/bash"]);
@@ -142,6 +142,11 @@ export function buildDockerRunArgs(config: PiContainerConfig & RuntimeContext, c
   args.push("-e", `HOST_UID=${uid}`);
   args.push("-e", `HOST_GID=${gid}`);
 
+  // Docker socket mount for privileged mode (Docker-out-of-Docker)
+  if (config.privileged) {
+    args.push("-v", "/var/run/docker.sock:/var/run/docker.sock");
+  }
+
   // Image
   args.push(PI_IMAGE);
 
@@ -159,11 +164,11 @@ export function buildDockerRunArgs(config: PiContainerConfig & RuntimeContext, c
 //   - package/ (built-in, from installed module)
 //   - settings/ (built-in, from installed module)
 
-function createBuildContext(dockerfileExtension?: string): string {
+function createBuildContext(dockerfileExtension?: string, privileged?: boolean): string {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-build-"));
 
   // Generate Dockerfile
-  const dockerfile = generateDockerfile(dockerfileExtension);
+  const dockerfile = generateDockerfile(dockerfileExtension, privileged);
   fs.writeFileSync(path.join(tmpDir, "Dockerfile"), dockerfile);
 
   // Generate entrypoint
