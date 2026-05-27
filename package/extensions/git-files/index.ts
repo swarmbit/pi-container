@@ -166,7 +166,7 @@ async function showDiffInNeovim(ctx: ExtensionCommandContext) {
   fs.writeFileSync(tmpFile, diffLines.join("\n"), "utf-8");
   const editor = process.env.VISUAL || process.env.EDITOR || "nvim";
   try {
-    spawnSync(editor, [tmpFile], { stdio: "inherit", cwd: ctx.cwd });
+    spawnSync(editor, ["-c", "set filetype=diff", tmpFile], { stdio: "inherit", cwd: ctx.cwd });
   } catch (e) {
     ctx.ui.notify(`Failed to open editor: ${String(e)}`, "error");
   }
