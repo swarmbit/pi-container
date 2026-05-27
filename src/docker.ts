@@ -263,6 +263,16 @@ export function buildDockerRunArgs(config: PiContainerConfig & RuntimeContext, c
     args.push("-e", `${key}=${value}`);
   }
 
+  // Git user info from config (used by entrypoint to set git config in container)
+  if (config.gitUserName) {
+    args.push("-e", `GIT_USER_NAME=${config.gitUserName}`);
+    debugLog(`Passing GIT_USER_NAME: ${config.gitUserName}`);
+  }
+  if (config.gitUserEmail) {
+    args.push("-e", `GIT_USER_EMAIL=${config.gitUserEmail}`);
+    debugLog(`Passing GIT_USER_EMAIL: ${config.gitUserEmail}`);
+  }
+
   // Port mappings (localhost only)
   if (config.ports.length > 0) {
     debugLog(`Port mappings: ${config.ports.map(p => `${p.host}:${p.container}`).join(", ")}`);

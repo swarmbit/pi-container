@@ -16,12 +16,15 @@
 //     - 8080:80
 //   env:
 //     ANTHROPIC_API_KEY: sk-xxx
+//   gitUserName: John Doe
+//   gitUserEmail: john@example.com
 //   privileged: true  # mount docker socket + install Docker CLI
 //   dockerSocket: /var/run/docker.sock  # custom socket path
 // ============================================================
 
 import * as path from "path";
 import * as fs from "fs";
+import { spawnSync } from "child_process";
 import yaml from "js-yaml";
 
 // ── Debug logging ────────────────────────────────────────────
@@ -71,6 +74,10 @@ export interface PiContainerConfig {
   privileged: boolean;
   /** Host path to the Docker socket (default: /var/run/docker.sock). */
   dockerSocket: string;
+  /** Git user name for commits made inside the container. */
+  gitUserName?: string;
+  /** Git user email for commits made inside the container. */
+  gitUserEmail?: string;
 }
 
 /** Runtime context (derived from environment, not user-configurable). */
@@ -103,6 +110,8 @@ interface ConfigFile {
   dockerfileExtension?: string;
   privileged?: boolean;
   dockerSocket?: string;
+  gitUserName?: string;
+  gitUserEmail?: string;
 }
 
 // ── Loading ────────────────────────────────────────────────────
@@ -162,12 +171,26 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig & Run
     userConfig.dockerSocket ??
     DEFAULT_DOCKER_SOCKET;
 
+  // Git user name: project config > user config > host git config
+  const gitUserName: string | undefined =
+    projectConfig.gitUserName ??
+    userConfig.gitUserName ??
+    inferGitConfig(homeDir, "user.name");
+
+  // Git user email: project config > user config > host git config
+  const gitUserEmail: string | undefined =
+    projectConfig.gitUserEmail ??
+    userConfig.gitUserEmail ??
+    inferGitConfig(homeDir, "user.email");
+
   return {
     ports,
     env,
     dockerfileExtension,
     privileged,
     dockerSocket,
+    gitUserName,
+    gitUserEmail,
     configDir,
     containerDir,
     projectDir,
@@ -188,6 +211,33 @@ function findContainerDir(projectDir: string): string {
 
 function getHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || "/root";
+}
+
+/**
+ * Infer a git config value from the host machine.
+ * Runs `git config <key>` to read the user's git configuration.
+ * Returns undefined if the command fails or produces no output.
+ */
+function inferGitConfig(homeDir: string, key: string): string | undefined {
+  try {
+    const result = spawnSync("git", ["config", key], {
+      cwd: homeDir,
+      stdio: "pipe",
+      timeout: 5000,
+    });
+    if (result.status === 0 && result.stdout) {
+      const value = result.stdout.toString().trim();
+      if (value) {
+        debugLog(`Inferred git ${key} from host: ${value}`);
+        return value;
+      }
+    }
+    debugLog(`Could not infer git ${key} from host (status: ${result.status})`);
+    return undefined;
+  } catch (e) {
+    debugLog(`Error inferring git ${key}: ${e}`);
+    return undefined;
+  }
 }
 
 // ── Port parsing ────────────────────────────────────────────────
