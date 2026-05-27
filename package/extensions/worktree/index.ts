@@ -10,14 +10,12 @@
 // session manager.
 //
 // Commands:
-//   /worktree:prepare-session <name>  Create worktree + tell LLM to use worktree
-//   /worktree:open                    Select worktree and fork into it
-//   /worktree:delete                  Interactively select and delete a worktree
-//   /worktree:close                   Fork back to the original project directory
+//   /worktree:create <name>           Create worktree and open a new session on it
+//   /worktree:open                    Interactively select and open a new session on it
+//   /worktree:close                   Open a new session on the project directory
+//   /worktree:delete                  Interactively select and delete a worktree and associated session
 //   /worktree:sync                    Merge base branch into the worktree
 //   /worktree:accept                  Merge worktree changes back into the base branch
-//   /worktree:log                     Toggle logging to file vs console
-//   /worktree:list                    List all managed worktrees
 //
 // Registry:
 //   ~/.pi/worktrees/<encoded-cwd>/registry.json
@@ -30,6 +28,8 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { execSync } from "node:child_process";
 import * as os from "node:os";
+import { writeFileSync } from "node:fs";
+
 
 // ── Logging ──────────────────────────────────────────────────
 
@@ -191,6 +191,25 @@ export interface CreateResult {
   worktreePath?: string;
 }
 
+async function createNewSession(ctx: ExtensionCommandContext, cwd: string) {
+  const sm = SessionManager.create(cwd);
+  const sessionHeader = sm.getHeader();
+  const sessionFilePath = sm.getSessionFile() ?? "";
+
+  // Manually write the session file
+  // If we don't write the session file at this state it will use the wrong cwd
+  writeFileSync(sessionFilePath, JSON.stringify(sessionHeader) + "\n");
+
+  await ctx.switchSession(sessionFilePath, {
+    withSession: async (newCtx) => {
+      newCtx.ui.notify(
+        `You are now on directory: ` + cwd,
+        "info"
+      );
+    },
+  });
+}
+
 export async function createWorktree(
   pi: ExtensionAPI,
   ctx:  ExtensionCommandContext,
@@ -253,93 +272,6 @@ export async function createWorktree(
   log(`createWorktree: registry updated for ${worktreeName}`);
 
   return { worktreeName, worktreePath };
-}
-
-// ── Fork into worktree ─────────────────────────────────────
-
-export interface ForkResult {
-  error?: string;
-  worktreeName?: string;
-  worktreePath?: string;
-}
-
-export async function forkWorktree(
-  pi: ExtensionAPI,
-  ctx: ExtensionCommandContext,
-  worktreeName: string
-): Promise<ForkResult> {
-  log(`forkWorktree: name=${worktreeName}`);
-
-  const registry = readRegistry(ctx.cwd);
-  const entry = registry.worktrees[worktreeName];
-
-  if (!entry) {
-    return { error: `Worktree "${worktreeName}" not found in registry.` };
-  }
-
-  // Get current session to fork from
-  const sourceSessionPath = ctx.sessionManager.getSessionFile();
-  if (!sourceSessionPath) {
-    return {
-      error:
-        "No current session file to fork from. " +
-        "Start a conversation first so there is a session to copy into the worktree.",
-    };
-  }
-
-  // Set the original session name to the worktree name (without hash)
-  // if no explicit name was already set
-  const currentSessionName = pi.getSessionName();
-  if (!currentSessionName) {
-    const lastDash = worktreeName.lastIndexOf("-");
-    if (lastDash > 0) {
-      const nameWithoutHash = worktreeName.substring(0, lastDash);
-      pi.setSessionName(nameWithoutHash);
-      log(`forkWorktree: set original session name to "${nameWithoutHash}"`);
-    }
-  }
-
-  const absoluteWorktreePath = entry.path;
-  log(`forkWorktree: forkFrom ${sourceSessionPath} -> ${absoluteWorktreePath}`);
-
-  let forkedSm: ReturnType<typeof SessionManager.forkFrom>;
-  try {
-    forkedSm = SessionManager.forkFrom(sourceSessionPath, absoluteWorktreePath);
-  } catch (err: any) {
-    log(`forkWorktree: forkFrom failed: ${err.message ?? String(err)}`);
-    return { error: `Failed to fork session: ${err.message ?? String(err)}` };
-  }
-
-  // Set the session display name to the worktree name
-  forkedSm.appendSessionInfo(worktreeName);
-  log(`forkWorktree: set session name to "${worktreeName}"`);
-
-  const sessionFile = forkedSm.getSessionFile();
-  if (!sessionFile) {
-    return { error: "Failed to create session file for forked session." };
-  }
-
-  log(`forkWorktree: forked session file: ${sessionFile}`);
-
-  // Switch to the forked session
-  log(`forkWorktree: switching to session ${sessionFile}`);
-  await ctx.switchSession(sessionFile, {
-    withSession: async (newCtx: any) => {
-      newCtx.ui.notify(
-        `Joined worktree "${worktreeName}" at ${entry.path}.`,
-        "info"
-      );
-      await newCtx.sendUserMessage(
-        "You were moved to a new directory. You should now apply changes and excute changes on this directory. Wait for further instructions, do not execute any command now."
-      );
-    },
-  });
-  log(`forkWorktree: switch complete`);
-
-  return {
-    worktreeName,
-    worktreePath: entry.path,
-  };
 }
 
 // ── Delete worktree ────────────────────────────────────────
@@ -442,41 +374,22 @@ export async function deleteWorktree(
   return {};
 }
 
-// ── List worktrees ─────────────────────────────────────────
-
-export function listWorktrees(ctx: any): string[] {
-  const registry = readRegistry(ctx.cwd);
-  const currentCwd = ctx.sessionManager.getCwd();
-  const lines: string[] = [];
-
-  for (const [name, entry] of Object.entries(registry.worktrees)) {
-    const marker = currentCwd && currentCwd === entry.path ? " ← current" : "";
-    const missing = !fs.existsSync(entry.path) ? " [directory missing]" : "";
-    lines.push(`${name}  base=${entry.baseRef}${marker}${missing}`);
-  }
-
-  return lines;
-}
-
 // ── Extension entry point ────────────────────────────────────
 
 export default function (pi: ExtensionAPI) {
-  // ==========================================================
-  // Commands
-  // ==========================================================
 
-  pi.registerCommand("worktree:prepare-session", {
-    description: "Prepare a worktree so the LLM knows it will be moved: /worktree:prepare-session <name>",
+  pi.registerCommand("worktree:create", {
+    description: "Create a worktree and a new session on it: /worktree:create <name>",
     handler: async (args, ctx) => {
       if (isInsideWorktree(ctx.cwd)) {
-        ctx.ui.notify("Cannot prepare a worktree from inside a worktree. Use /worktree:close first.", "error");
+        ctx.ui.notify("Cannot create a worktree from inside a worktree. Use /worktree:close first.", "error");
         return;
       }
 
       const name = (args ?? "").trim().split(/\s+/)[0];
 
       if (!name) {
-        ctx.ui.notify("Usage: /worktree:prepare-session <name>", "error");
+        ctx.ui.notify("Usage: /worktree:create <name>", "error");
         return;
       }
 
@@ -485,24 +398,23 @@ export default function (pi: ExtensionAPI) {
       const worktreeName = buildWorktreeName(shortHash, name);
       const registry = readRegistry(ctx.cwd);
 
-      if (!registry.worktrees[worktreeName]) {
+      const worktree = registry.worktrees[worktreeName]
+      if (!worktree) {
         const result = await createWorktree(pi, ctx, name);
         if (result.error) {
           ctx.ui.notify(result.error, "error");
           return;
         }
-        ctx.ui.notify(`Worktree "${result.worktreeName}" created.`, "info");
+        await createNewSession(ctx, result.worktreePath ?? "")
+      } else {
+        await createNewSession(ctx, worktree.path ?? "")
       }
 
-      pi.sendUserMessage(
-        `You are about to be moved to worktree "${getWorktreeProjectDir(ctx.cwd)}/${worktreeName}". ` +
-        `Make no action — do not call any tools. Wait for the user to run /worktree:open.`
-      );
     },
   });
 
   pi.registerCommand("worktree:open", {
-    description: "Select a worktree and fork the current session into it",
+    description: "Select a worktree and open a new session on it",
     handler: async (_args, ctx) => {
       if (isInsideWorktree(ctx.cwd)) {
         ctx.ui.notify("Already in a worktree. Use /worktree:close first.", "error");
@@ -513,12 +425,12 @@ export default function (pi: ExtensionAPI) {
       const names = Object.keys(registry.worktrees);
 
       if (names.length === 0) {
-        ctx.ui.notify("No worktrees available. Use /worktree:prepare-session <name> first.", "info");
+        ctx.ui.notify("No worktrees available. Use /worktree:create <name> first.", "info");
         return;
       }
 
       const choice = await ctx.ui.select(
-        "Select worktree to join:",
+        "Select worktree to open:",
         names.map((n) => {
           const e = registry.worktrees[n];
           return `${n}  (${e.baseRef})`;
@@ -526,15 +438,20 @@ export default function (pi: ExtensionAPI) {
       );
 
       if (!choice) {
-        ctx.ui.notify("Join cancelled.", "info");
+        ctx.ui.notify("Open cancelled.", "info");
         return;
       }
 
       const worktreeName = choice.split("  ")[0];
-      const result = await forkWorktree(pi, ctx, worktreeName);
-      if (result.error) {
-        ctx.ui.notify(result.error, "error");
+      const entry = registry.worktrees[worktreeName];
+
+      if (!entry) {
+        ctx.ui.notify(`Worktree "${worktreeName}" not found`, "info");
+        return;
       }
+      
+      await createNewSession(ctx, entry.path);
+
     },
   });
 
@@ -580,23 +497,6 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       ctx.ui.notify(`Worktree "${worktreeName}" deleted.`, "info");
-    },
-  });
-
-  pi.registerCommand("worktree:list", {
-    description: "List all managed worktrees",
-    handler: async (_args, ctx) => {
-      if (isInsideWorktree(ctx.cwd)) {
-        ctx.ui.notify("Cannot list worktrees from inside a worktree. Use /worktree:close first.", "error");
-        return;
-      }
-
-      const lines = listWorktrees(ctx);
-      if (lines.length === 0) {
-        ctx.ui.notify("No worktrees registered.", "info");
-        return;
-      }
-      await ctx.ui.select("Worktrees:", lines);
     },
   });
 
@@ -729,55 +629,8 @@ export default function (pi: ExtensionAPI) {
         return;
       }
 
-      const sourceSessionPath = ctx.sessionManager.getSessionFile();
-      if (!sourceSessionPath) {
-        ctx.ui.notify("No current session file to fork from.", "error");
-        return;
-      }
-
       const originalCwd = worktreeEntry.originalCwd;
-      log(`worktree:close: forkFrom ${sourceSessionPath} -> ${originalCwd}`);
-
-      let forkedSm: ReturnType<typeof SessionManager.forkFrom>;
-      try {
-        forkedSm = SessionManager.forkFrom(sourceSessionPath, originalCwd);
-      } catch (err: any) {
-        ctx.ui.notify(`Failed to fork session: ${err.message ?? String(err)}`, "error");
-        return;
-      }
-
-      const sessionFile = forkedSm.getSessionFile();
-      if (!sessionFile) {
-        ctx.ui.notify("Failed to create session file.", "error");
-        return;
-      }
-
-      await ctx.switchSession(sessionFile, {
-        withSession: async (newCtx: any) => {
-          newCtx.ui.notify(
-            `Closed worktree. Returned to ${originalCwd}.`,
-            "info"
-          );
-          await newCtx.sendUserMessage(
-            "You have been moved back to the original project directory. All work should now be done relative to this directory."
-          );
-        },
-      });
-    },
-  });
-
-  pi.registerCommand("worktree:log", {
-    description: "Toggle worktree logging between console and file",
-    handler: async (_args, ctx) => {
-      _logToFile = !_logToFile;
-      if (_logToFile) {
-        ctx.ui.notify(
-          `Worktree logging → file (${LOG_FILE})`,
-          "info"
-        );
-      } else {
-        ctx.ui.notify("Worktree logging → console (for debugging)", "info");
-      }
+      await createNewSession(ctx, originalCwd)
     },
   });
 }
