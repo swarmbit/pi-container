@@ -24,6 +24,24 @@ import * as path from "path";
 import * as fs from "fs";
 import yaml from "js-yaml";
 
+// ── Debug logging ────────────────────────────────────────────
+
+let DEBUG = false;
+
+export function setDebug(enabled: boolean): void {
+  DEBUG = enabled;
+}
+
+export function isDebug(): boolean {
+  return DEBUG;
+}
+
+export function debugLog(...args: unknown[]): void {
+  if (DEBUG) {
+    console.error("[DEBUG]", ...args);
+  }
+}
+
 // ── Package constants ──────────────────────────────────────────
 
 /** Pi version shipped by this version of pi-container. */
@@ -61,6 +79,7 @@ export interface RuntimeContext {
   containerDir: string;   // absolute path to .pi dir, "" if none
   projectDir: string;     // absolute path — CWD
   workspaceDir: string;   // container path — e.g. /myproject
+  debug: boolean;         // debug mode enabled
 }
 
 export interface LoadConfigOptions {
@@ -72,6 +91,8 @@ export interface LoadConfigOptions {
   cliPrivileged?: boolean;
   /** Docker socket path from CLI (highest precedence). */
   cliDockerSocket?: string;
+  /** Enable debug logging. */
+  debug?: boolean;
 }
 
 // ── Config file schema ────────────────────────────────────────
@@ -151,6 +172,7 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig & Run
     containerDir,
     projectDir,
     workspaceDir: `/${path.basename(projectDir)}`,
+    debug: options?.debug ?? false,
   };
 }
 

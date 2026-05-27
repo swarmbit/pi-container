@@ -27,11 +27,13 @@ FROM node:22-bookworm-slim AS runtime
 ARG PI_VERSION={{piVersion}}
 ENV PI_VERSION=${PI_VERSION}
 
-# Install runtime dependencies
+# Install runtime dependencies (docker.io included so the CLI is always
+# available; the socket is mounted at runtime only with --privileged)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \
     gosu \
+    docker.io \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user

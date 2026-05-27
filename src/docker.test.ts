@@ -26,6 +26,7 @@ interface FullConfig extends PiContainerConfig {
   containerDir: string;
   projectDir: string;
   workspaceDir: string;
+  debug: boolean;
 }
 
 function makeFullConfig(overrides: Partial<FullConfig> = {}): FullConfig {
@@ -38,6 +39,7 @@ function makeFullConfig(overrides: Partial<FullConfig> = {}): FullConfig {
     containerDir: "",
     projectDir: "/project",
     workspaceDir: "/project",
+    debug: false,
     ...overrides,
   };
 }

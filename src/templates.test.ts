@@ -33,6 +33,7 @@ describe("generateDockerfile", () => {
     const df = generateDockerfile();
     expect(df).toContain("git");
     expect(df).toContain("gosu");
+    expect(df).toContain("docker.io");
   });
 
   it("creates pi-user", () => {
@@ -93,25 +94,13 @@ describe("generateDockerfile", () => {
     expect(argLines[1]).toBe(`ARG PI_VERSION=${PI_VERSION}`);
   });
 
-  it("includes Docker CLI installation when privileged is true", () => {
-    const df = generateDockerfile(undefined, true);
-    expect(df).toContain("Install Docker CLI for container-in-container");
+  it("includes Docker CLI by default", () => {
+    const df = generateDockerfile();
     expect(df).toContain("docker.io");
   });
 
-  it("does not include Docker CLI when privileged is false", () => {
-    const df = generateDockerfile(undefined, false);
-    expect(df).not.toContain("docker.io");
-    expect(df).not.toContain("Install Docker CLI for container-in-container");
-  });
-
-  it("does not include Docker CLI when privileged is not passed (defaults)", () => {
-    const df = generateDockerfile();
-    expect(df).not.toContain("docker.io");
-  });
-
-  it("includes both extension and Docker CLI when both are provided", () => {
-    const df = generateDockerfile("RUN echo extension", true);
+  it("includes both extension and Docker CLI when extension is provided", () => {
+    const df = generateDockerfile("RUN echo extension");
     expect(df).toContain("docker.io");
     expect(df).toContain("Extension from .pi/pi-container.yml");
     expect(df).toContain("RUN echo extension");
@@ -142,9 +131,12 @@ describe("generateEntrypoint", () => {
     expect(sh).toContain('PI_AGENT_HOME="${PI_HOME}/agent"');
   });
 
-  it("fixes ownership of config directory", () => {
+  it("skips recursive chown on mounted config (ownership handled via UID/GID match)", () => {
     const sh = generateEntrypoint();
-    expect(sh).toContain("chown -R pi-user:pi-user");
+    // No recursive chown on ${PI_HOME} — it hangs on virtualized mounts
+    expect(sh).not.toContain("chown -R pi-user:pi-user");
+    // Single-file chown still present for files we create
+    expect(sh).toContain('chown pi-user:pi-user "${PI_SETTINGS}"');
   });
 
   it("copies default settings if none exist", () => {

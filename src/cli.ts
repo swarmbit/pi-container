@@ -15,7 +15,7 @@
 //   3. Project config           (.pi/pi-container.yml)
 // ============================================================
 
-import { loadConfig, getUserConfigPath, PI_VERSION, PI_IMAGE, checkPortAvailable } from "./config";
+import { loadConfig, getUserConfigPath, PI_VERSION, PI_IMAGE, checkPortAvailable, setDebug, debugLog } from "./config";
 import { buildImage, runContainer, shellInContainer, buildDockerRunArgs } from "./docker";
 import * as fs from "fs";
 import * as path from "path";
@@ -35,6 +35,7 @@ Commands:
 Options:
   --help, -h        Show this help
   --version         Show version
+  --debug, -d       Enable debug logging
   -p, --port PORT   Publish container port to localhost (repeatable)
                     PORT can be a simple port (3000) or host:container (8080:3000)
   --privileged      Mount docker socket and install Docker CLI (Docker-out-of-Docker)
@@ -97,6 +98,7 @@ async function main(): Promise<void> {
   const cliPorts: string[] = [];
   let cliPrivileged: boolean | undefined;
   let cliDockerSocket: string | undefined;
+  let cliDebug = false;
 
   for (let i = 0; i < ourArgs.length; i++) {
     const arg = ourArgs[i];
@@ -108,7 +110,9 @@ async function main(): Promise<void> {
       printVersion();
       return;
     }
-    if (arg === "-p" || arg === "--port") {
+    if (arg === "--debug" || arg === "-d") {
+      cliDebug = true;
+    } else if (arg === "-p" || arg === "--port") {
       const value = ourArgs[i + 1];
       if (!value || value.startsWith("-")) {
         console.error(`Error: ${arg} requires a port argument.`);
@@ -141,11 +145,20 @@ async function main(): Promise<void> {
     }
   }
 
+  // Enable debug logging if requested
+  if (cliDebug) {
+    setDebug(true);
+    debugLog("Debug mode enabled");
+    debugLog("CLI args:", { ourArgs, piArgs, command });
+  }
+
   // Check that Docker is available (skip for dry-run)
   if (command !== "dry-run") {
     try {
-      execSync("docker --version", { stdio: "pipe" });
-    } catch {
+      const dockerVersion = execSync("docker --version", { stdio: "pipe" }).toString().trim();
+      debugLog(`Docker found: ${dockerVersion}`);
+    } catch (e) {
+      debugLog("Docker check failed:", e);
       console.error("Error: Docker is not installed or not running.");
       console.error("Please install Docker and ensure it's accessible.");
       process.exit(1);
@@ -153,12 +166,26 @@ async function main(): Promise<void> {
   }
 
   // Load config from .pi/, user config
-  const config = loadConfig({ cliPorts, cliPrivileged, cliDockerSocket });
+  debugLog("Loading config...");
+  const config = loadConfig({ cliPorts, cliPrivileged, cliDockerSocket, debug: cliDebug });
+  debugLog("Config loaded:", {
+    ports: config.ports,
+    envKeys: Object.keys(config.env),
+    privileged: config.privileged,
+    dockerSocket: config.dockerSocket,
+    configDir: config.configDir,
+    containerDir: config.containerDir || "(none)",
+    projectDir: config.projectDir,
+    workspaceDir: config.workspaceDir,
+    dockerfileExtension: config.dockerfileExtension ? "(present)" : "(none)",
+    debug: config.debug,
+  });
 
   fs.mkdirSync(config.configDir + "/agent", { recursive: true });
 
   // Check port availability before running
   if ((command === "run" || command === "shell") && config.ports.length > 0) {
+    debugLog(`Checking port availability for ${config.ports.length} port(s)...`);
     const conflicts = await checkPorts(config.ports);
     if (conflicts.length > 0) {
       console.error("Error: The following ports are already in use on localhost:");
@@ -174,15 +201,16 @@ async function main(): Promise<void> {
   }
 
   // Dispatch command
+  debugLog(`Dispatching command: ${command}`);
   switch (command) {
     case "build":
       buildImage(config.dockerfileExtension, config.privileged);
       break;
     case "shell":
-      shellInContainer(config);
+      await shellInContainer(config);
       break;
     case "run":
-      runContainer(config, piArgs.length > 0 ? ["pi", ...piArgs] : ["pi"]);
+      await runContainer(config, piArgs.length > 0 ? ["pi", ...piArgs] : ["pi"]);
       break;
     case "dry-run":
       printDryRun(config, piArgs);

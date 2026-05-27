@@ -21,21 +21,10 @@ const TEMPLATES_DIR = path.join(__dirname, "..", "templates");
  * {{piVersion}} is injected, and an optional extension block
  * (from .pi/pi-container.yml) is appended at the end.
  */
-export function generateDockerfile(extension?: string, privileged?: boolean): string {
+export function generateDockerfile(extension?: string): string {
   const templatePath = path.join(TEMPLATES_DIR, "Dockerfile");
   let content = fs.readFileSync(templatePath, "utf-8");
   content = content.replace(/\{\{piVersion\}\}/g, PI_VERSION);
-
-  // Inject Docker CLI installation for privileged mode (container-in-container)
-  if (privileged) {
-    const installMarker = "&& rm -rf /var/lib/apt/lists/*\n";
-    const dockerInstall =
-      "\n# Install Docker CLI for container-in-container (privileged mode)\n" +
-      "RUN apt-get update && apt-get install -y --no-install-recommends \\\n" +
-      "    docker.io \\\n" +
-      "    && rm -rf /var/lib/apt/lists/*\n";
-    content = content.replace(installMarker, installMarker + dockerInstall);
-  }
 
   if (extension) {
     content =

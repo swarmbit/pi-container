@@ -19,12 +19,16 @@ if [ "$(id -u pi-user)" != "${HOST_UID}" ]; then
 fi
 
 # ── Fix ownership of config directory ──────────────────
-chown -R pi-user:pi-user "${PI_HOME}" 2>/dev/null || true
+# Skip chown on the mounted volume: pi-user's UID/GID already
+# match the host (set above), so mounted files are accessible.
+# Recursive chown on virtualized mounts can hang indefinitely.
+# Only chown files we create ourselves below.
 
 # ── Copy default settings if none exist ────────────────
 PI_SETTINGS="${PI_AGENT_HOME}/settings.json"
 DEFAULT_SETTINGS="/opt/pi/default-settings.json"
 if [ ! -f "${PI_SETTINGS}" ]; then
+  mkdir -p "${PI_AGENT_HOME}"
   cp "${DEFAULT_SETTINGS}" "${PI_SETTINGS}"
   chown pi-user:pi-user "${PI_SETTINGS}" 2>/dev/null || true
 fi
