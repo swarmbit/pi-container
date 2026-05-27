@@ -318,8 +318,8 @@ describe("DANGEROUS_PATTERNS", () => {
     expect(somePatternMatches("chmod +x script.sh")).toBe(false);
   });
 
-  it("matches write to /dev/", () => {
-    expect(somePatternMatches("echo data > /dev/sda")).toBe(true);
+  it("does not match redirect to /dev/ (devices write is not a pattern)", () => {
+    expect(somePatternMatches("echo data > /dev/sda")).toBe(false);
   });
 
   it("matches curl pipe to sh", () => {

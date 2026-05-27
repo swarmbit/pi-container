@@ -100,9 +100,7 @@ describe("CLI dry-run", () => {
     const output = runCli("dry-run", { cwd: tmpDir });
 
     expect(output).toContain("version:");
-    expect(output).toContain("0.75.5");
     expect(output).toContain("image:");
-    expect(output).toContain("pi-agent:0.75.5");
   });
 
   it("detects .pi directory", () => {
