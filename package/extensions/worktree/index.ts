@@ -287,6 +287,18 @@ export async function forkWorktree(
     };
   }
 
+  // Set the original session name to the worktree name (without hash)
+  // if no explicit name was already set
+  const currentSessionName = pi.getSessionName();
+  if (!currentSessionName) {
+    const lastDash = worktreeName.lastIndexOf("-");
+    if (lastDash > 0) {
+      const nameWithoutHash = worktreeName.substring(0, lastDash);
+      pi.setSessionName(nameWithoutHash);
+      log(`forkWorktree: set original session name to "${nameWithoutHash}"`);
+    }
+  }
+
   const absoluteWorktreePath = entry.path;
   log(`forkWorktree: forkFrom ${sourceSessionPath} -> ${absoluteWorktreePath}`);
 

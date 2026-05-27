@@ -77,7 +77,7 @@ function mockSessionManager(sessionFile: string) {
   };
 }
 
-function mockPi(gitResults: Array<{ code: number; stdout: string; stderr: string }> = []) {
+function mockPi(gitResults: Array<{ code: number; stdout: string; stderr: string }> = [], opts?: { sessionName?: string }) {
   let callIndex = 0;
   return {
     exec: vi.fn().mockImplementation(async (_cmd: string, _args: string[]) => {
@@ -85,6 +85,8 @@ function mockPi(gitResults: Array<{ code: number; stdout: string; stderr: string
       callIndex++;
       return result;
     }),
+    getSessionName: vi.fn().mockReturnValue(opts?.sessionName ?? null),
+    setSessionName: vi.fn(),
   } as any;
 }
 
@@ -409,7 +411,11 @@ describe("forkWorktree", () => {
       "/pi-container/.pi/worktrees/proj/feat-abc123"
     );
 
-    // Session name set to worktree name
+    // Original session name set to worktree name without hash
+    expect(pi.getSessionName).toHaveBeenCalled();
+    expect(pi.setSessionName).toHaveBeenCalledWith("feat");
+
+    // Forked session name set to full worktree name
     expect(mockSm.appendSessionInfo).toHaveBeenCalledWith("feat-abc123");
 
     // Switch called
@@ -417,6 +423,31 @@ describe("forkWorktree", () => {
       "/sessions/forked.jsonl",
       expect.objectContaining({ withSession: expect.any(Function) })
     );
+  });
+
+  it("does not override original session name if already set", async () => {
+    mockFsReadFileSync.mockReturnValue(
+      JSON.stringify({
+        worktrees: {
+          "feat-abc123": {
+            path: "/pi-container/.pi/worktrees/proj/feat-abc123",
+            createdAt: "",
+            baseRef: "main",
+            originalCwd: TEST_CWD,
+          },
+        },
+      })
+    );
+    const mockSm = mockSessionManager("/sessions/forked.jsonl");
+    mockSessionForkFrom.mockReturnValue(mockSm);
+    pi = mockPi([], { sessionName: "existing-name" });
+    ctx = mockCtx("/sessions/current.jsonl");
+
+    const result = await forkWorktree(pi, ctx, "feat-abc123");
+
+    expect(result.error).toBeUndefined();
+    expect(pi.getSessionName).toHaveBeenCalled();
+    expect(pi.setSessionName).not.toHaveBeenCalled();
   });
 
   it("returns error if forkFrom throws", async () => {
