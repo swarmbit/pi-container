@@ -185,6 +185,53 @@ export async function shellInContainer(config: PiContainerConfig & RuntimeContex
   }
 }
 
+/**
+ * Open a shell in an existing container via docker exec.
+ * Runs /bin/bash as pi-user so file permissions match the host.
+ */
+export async function execInContainer(containerId: string): Promise<void> {
+  debugLog(`execInContainer called for: ${containerId}`);
+
+  // Verify the container exists and is running
+  const inspect = spawnSync("docker", ["container", "inspect", containerId], { stdio: "pipe" });
+  if (inspect.status !== 0) {
+    console.error(`Error: Container "${containerId}" not found.`);
+    console.error(inspect.stderr.toString().trim());
+    process.exit(1);
+  }
+
+  let containerData: any;
+  try {
+    containerData = JSON.parse(inspect.stdout.toString());
+  } catch {
+    console.error(`Error: Failed to inspect container "${containerId}".`);
+    process.exit(1);
+  }
+
+  if (!containerData[0]?.State?.Running) {
+    console.error(`Error: Container "${containerId}" is not running.`);
+    process.exit(1);
+  }
+
+  console.log(`🐚 Opening shell in container ${containerId}...`);
+  const isTTY = process.stdin.isTTY;
+  const args = ["exec"];
+  if (isTTY) {
+    args.push("-it");
+  } else {
+    args.push("-i");
+  }
+  args.push("-u", "pi-user", containerId, "/bin/bash");
+
+  debugLog(`Running: docker ${args.join(" ")}`);
+  const result = await spawnDocker(args, false);
+
+  debugLog(`Docker exec exited with status: ${result.status}${result.error ? ", error: " + result.error.message : ""}`);
+  if (result.status !== 0 && result.status !== null) {
+    process.exit(result.status);
+  }
+}
+
 // ── Docker run arg construction ──────────────────────────────
 
 export function buildDockerRunArgs(config: PiContainerConfig & RuntimeContext, command: string[]): string[] {

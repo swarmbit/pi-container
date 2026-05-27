@@ -8,6 +8,7 @@
 //   pi-container -- -r                     # resume session
 //   pi-container build                    # build/rebuild image
 //   pi-container shell                    # drop into container shell
+//   pi-container shell <container-id>     # exec into an existing container
 //
 // Port config precedence (highest wins):
 //   1. CLI flags              (-p, --port)
@@ -16,7 +17,7 @@
 // ============================================================
 
 import { loadConfig, getUserConfigPath, PI_VERSION, PI_IMAGE, checkPortAvailable, setDebug, debugLog } from "./config";
-import { buildImage, runContainer, shellInContainer, buildDockerRunArgs } from "./docker";
+import { buildImage, runContainer, shellInContainer, execInContainer, buildDockerRunArgs } from "./docker";
 import * as fs from "fs";
 import * as path from "path";
 import { execSync } from "child_process";
@@ -29,7 +30,7 @@ Usage: pi-container [command] [options] [-- PI_ARGS...]
 Commands:
   (default)     Run pi in Docker (interactive session)
   build         Build or rebuild the Docker image
-  shell         Open a shell in the container
+  shell [id]    Open a shell in a new container, or exec into an existing one by ID/name
   dry-run       Print resolved config and docker commands without executing
 
 Options:
@@ -52,6 +53,7 @@ Examples:
   pi-container -- -r                        # resume session
   pi-container build                        # build image
   pi-container shell                        # container shell
+  pi-container shell my-container           # exec into an existing container
 
 Port config precedence (highest wins):
   1. CLI flags (-p, --port)
@@ -95,6 +97,7 @@ async function main(): Promise<void> {
 
   // Parse our args
   let command: "run" | "build" | "shell" | "dry-run" = "run";
+  let shellContainerId: string | undefined;
   const cliPorts: string[] = [];
   let cliPrivileged: boolean | undefined;
   let cliDockerSocket: string | undefined;
@@ -136,6 +139,12 @@ async function main(): Promise<void> {
       command = "build";
     } else if (arg === "shell") {
       command = "shell";
+      // Peek at next arg: if it's not a flag, treat it as a container ID
+      const nextArg = ourArgs[i + 1];
+      if (nextArg && !nextArg.startsWith("-")) {
+        shellContainerId = nextArg;
+        i++; // skip the container ID
+      }
     } else if (arg === "dry-run") {
       command = "dry-run";
     } else {
@@ -150,6 +159,22 @@ async function main(): Promise<void> {
     setDebug(true);
     debugLog("Debug mode enabled");
     debugLog("CLI args:", { ourArgs, piArgs, command });
+  }
+
+  // If shell was given a container ID, exec directly (no config needed)
+  if (command === "shell" && shellContainerId) {
+    // Check Docker is available
+    try {
+      const dockerVersion = execSync("docker --version", { stdio: "pipe" }).toString().trim();
+      debugLog(`Docker found: ${dockerVersion}`);
+    } catch (e) {
+      debugLog("Docker check failed:", e);
+      console.error("Error: Docker is not installed or not running.");
+      console.error("Please install Docker and ensure it's accessible.");
+      process.exit(1);
+    }
+    await execInContainer(shellContainerId);
+    return;
   }
 
   // Check that Docker is available (skip for dry-run)

@@ -31,7 +31,7 @@ describe("CLI", () => {
     const output = execSync(`node ${CLI_PATH} --help`, { encoding: "utf-8" });
     expect(output).toContain("pi-container [command]");
     expect(output).toContain("build");
-    expect(output).toContain("shell");
+    expect(output).toContain("shell [id]");
     expect(output).toContain("dry-run");
   });
 
@@ -61,6 +61,27 @@ describe("CLI", () => {
     expect(output).toContain("pi");
     expect(output).toContain("test");
     fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it("accepts shell with container id (fails gracefully when container not found)", () => {
+    try {
+      execSync(`node ${CLI_PATH} shell nonexistent-container 2>&1`, { encoding: "utf-8" });
+      expect.fail("Should have exited with error");
+    } catch (e: any) {
+      expect(e.status).not.toBe(0);
+      const output = e.stderr || e.stdout || e.message || "";
+      expect(output).toContain("not found");
+    }
+  });
+
+  it("does not treat container id after shell as unknown argument", () => {
+    try {
+      execSync(`node ${CLI_PATH} shell my-container 2>&1`, { encoding: "utf-8" });
+    } catch (e: any) {
+      const output = e.stderr || e.stdout || e.message || "";
+      // Should fail with "not found", not "Unknown argument"
+      expect(output).not.toContain("Unknown argument");
+    }
   });
 });
 
