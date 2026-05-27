@@ -43,7 +43,6 @@ const DANGEROUS_PATTERNS: Array<{ pattern: RegExp; description: string }> = [
   { pattern: /\bmount\b/, description: "Mount filesystem" },
   { pattern: /\bchown\s+/, description: "Change ownership" },
   { pattern: /\bchmod\s+.*[0-7]{3,4}\s+/, description: "Permission change" },
-  { pattern: />\s*\/dev\//, description: "Write to device file" },
   { pattern: /\bcurl\s+.*\|\s*(sudo\s+)?sh\b/, description: "Pipe curl to shell" },
   { pattern: /\bwget\s+.*\|\s*(sudo\s+)?sh\b/, description: "Pipe wget to shell" },
 ];
