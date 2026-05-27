@@ -391,6 +391,27 @@ export async function deleteWorktree(
     }
   }
 
+  // Delete the associated branch
+  log(`deleteWorktree: deleting branch ${worktreeName}`);
+  const branchDeleteResult = await pi.exec("git", ["-C", entry.originalCwd, "branch", "-d", worktreeName]);
+  if (branchDeleteResult.code !== 0) {
+    log(`deleteWorktree: git branch -d FAILED: ${branchDeleteResult.stderr || branchDeleteResult.stdout}`);
+    const combined = ((branchDeleteResult.stderr || "") + (branchDeleteResult.stdout || "")).toLowerCase();
+    if (combined.includes("not fully merged")) {
+      const forceDelete = await ctx.ui.confirm(
+        "Branch Not Merged",
+        `Branch "${worktreeName}" is not fully merged. Force delete with "git branch -D"?`
+      );
+      if (forceDelete) {
+        log(`deleteWorktree: force deleting branch ${worktreeName}`);
+        await pi.exec("git", ["-C", entry.originalCwd, "branch", "-D", worktreeName]);
+      } else {
+        log(`deleteWorktree: user chose not to force delete branch ${worktreeName}`);
+      }
+    }
+    // For other failures (e.g. branch already deleted), proceed silently
+  }
+
   // Update registry
   delete registry.worktrees[worktreeName];
   writeRegistry(ctx.cwd, registry);

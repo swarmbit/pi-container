@@ -103,6 +103,7 @@ function mockCtx(sessionFile: string | undefined, cwd?: string) {
     ui: {
       notify: vi.fn(),
       select: vi.fn(),
+      confirm: vi.fn().mockResolvedValue(true),
     },
     sendUserMessage: vi.fn().mockResolvedValue(undefined),
   };
