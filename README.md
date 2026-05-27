@@ -176,6 +176,14 @@ dockerSocket: /var/run/docker.sock   # default
 dockerfileExtension: |
   RUN apt-get update && apt-get install -y python3 pip
   ENV PYTHONUNBUFFERED=1
+
+# ── Git user identity ──────────────────────────────────────
+# Set the Git author name and email for commits made inside
+# the container. If not set, pi-container infers them from
+# your host git config (git config user.name / user.email).
+# Precedence: project config > user config > host git config.
+gitUserName: John Doe
+gitUserEmail: john@example.com
 ```
 
 > **Important:** After changing `dockerfileExtension` or updating pi-container,
@@ -191,6 +199,8 @@ dockerfileExtension: |
 | `privileged` | `bool` | `false` | When `true`, mounts the host Docker socket (`/var/run/docker.sock`) into the container so pi can run Docker commands (build images, start containers). Docker CLI is already installed in the image. |
 | `dockerSocket` | `string` | `/var/run/docker.sock` | Host path to the Docker socket. Only used when `privileged: true`. Change this if your Docker daemon uses a non-standard socket path. |
 | `dockerfileExtension` | `string` | — | Arbitrary Dockerfile content appended during `pi-container build`. Use it to install extra system packages (`python3`, `ffmpeg`, etc.) or set image-level `ENV` vars. Requires a manual rebuild to take effect. |
+| `gitUserName` | `string` | *(host git config)* | Git author name for commits made inside the container. Falls back to `git config user.name` from the host if not set. |
+| `gitUserEmail` | `string` | *(host git config)* | Git author email for commits made inside the container. Falls back to `git config user.email` from the host if not set. |
 
 ### CLI flags
 
@@ -230,6 +240,9 @@ env:
 
 dockerfileExtension: |
   RUN apt-get update && apt-get install -y python3
+
+gitUserName: Team Bot
+gitUserEmail: bot@example.com
 ```
 
 After adding `dockerfileExtension`, rebuild the image:

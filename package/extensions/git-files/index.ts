@@ -2,7 +2,7 @@
 // git-files — Show changed git files above the editor
 // ============================================================
 // Widget shows changed files. Press Enter or use /git-diff to
-// open an overlay to pick a file and view its colored diff.
+// pick a file and open its diff in neovim.
 // ============================================================
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
@@ -61,90 +61,6 @@ function getFileDiff(cwd: string, filepath: string, staged: boolean): string[] {
   } catch {
     return ["(failed to read diff)"];
   }
-}
-
-// ── Configuration ──────────────────────────────────────────
-
-function getDiffMode(): "overlay" | "editor" {
-  const mode = process.env.GIT_FILES_DIFF_MODE;
-  if (mode === "editor") return "editor";
-  return "overlay";
-}
-
-// ── Diff overlay ────────────────────────────────────────────
-
-function colorizeDiffLine(line: string, th: any): string {
-  if (line.startsWith("+") && !line.startsWith("+++")) return th.fg("success", line);
-  if (line.startsWith("-") && !line.startsWith("---")) return th.fg("error", line);
-  if (line.startsWith("@@")) return th.fg("accent", line);
-  if (line.startsWith("diff ") || line.startsWith("index ") ||
-      line.startsWith("---") || line.startsWith("+++"))
-    return th.fg("muted", line);
-  return th.fg("dim", line);
-}
-
-class DiffOverlay implements Focusable {
-  focused = false;
-  private scroll = 0;
-  private title: string;
-  private lines: string[];
-  private th: any;
-
-  constructor(
-    theme: any,
-    title: string,
-    diffLines: string[],
-    private done: () => void,
-  ) {
-    this.th = theme;
-    this.title = title;
-    this.lines = diffLines.map((l) => colorizeDiffLine(l, theme));
-  }
-
-  handleInput(data: string): void {
-    if (matchesKey(data, "escape")) { this.done(); return; }
-    if (data === "q" || data === "Q") { this.done(); return; }
-    if (matchesKey(data, "down") || data === "j") {
-      this.scroll = Math.min(this.scroll + 1, Math.max(0, this.lines.length - 1));
-    }
-    if (matchesKey(data, "up") || data === "k") {
-      this.scroll = Math.max(0, this.scroll - 1);
-    }
-  }
-
-  render(width: number): string[] {
-    // Fixed overlay dimensions — won't resize with terminal or scrolling
-    const w = 80;
-    const innerW = w - 2;
-    const maxVisible = 20;
-    const th = this.th;
-    const out: string[] = [];
-    const pad = (s: string, len: number) => truncateToWidth(s + " ".repeat(Math.max(0, len - visibleWidth(s))), len);
-    const row = (content: string) => th.fg("border", "│") + pad(content, innerW) + th.fg("border", "│");
-
-    out.push(th.fg("border", `╭${"─".repeat(innerW)}╮`));
-    out.push(row(` ${th.fg("toolTitle", this.title)}`));
-    out.push(row(""));
-
-    const visible = this.lines.slice(this.scroll, this.scroll + maxVisible);
-    for (const line of visible) {
-      out.push(row(` ${line}`));
-    }
-
-    if (this.lines.length > maxVisible) {
-      out.push(row(""));
-      out.push(row(` ${th.fg("dim", `${this.scroll + 1}-${Math.min(this.scroll + maxVisible, this.lines.length)} of ${this.lines.length} lines — ↑↓ scroll  q close`)}`));
-    } else {
-      out.push(row(""));
-      out.push(row(` ${th.fg("dim", "q to close")}`));
-    }
-
-    out.push(th.fg("border", `╰${"─".repeat(innerW)}╯`));
-    return out;
-  }
-
-  invalidate(): void {}
-  dispose(): void {}
 }
 
 // ── File picker overlay ─────────────────────────────────────
@@ -225,9 +141,9 @@ class FilePickerOverlay implements Focusable {
   dispose(): void {}
 }
 
-// ── Show diff overlay chain ──────────────────────────────────
+// ── Show diff in neovim ─────────────────────────────────────
 
-async function showDiffOverlay(ctx: ExtensionCommandContext) {
+async function showDiffInNeovim(ctx: ExtensionCommandContext) {
   const files = getChangedFiles(ctx.cwd);
   if (files.length === 0) {
     ctx.ui.notify("No changed files.", "info");
@@ -242,28 +158,19 @@ async function showDiffOverlay(ctx: ExtensionCommandContext) {
 
   if (!pickResult || pickResult.action !== "view" || !pickResult.file) return;
 
-  // Step 2: diff viewer
+  // Step 2: open diff in neovim
   const file = pickResult.file;
   const diffLines = getFileDiff(ctx.cwd, file.path, file.staged);
-  const title = `${file.staged ? "Staged" : "Unstaged"}: ${file.path}`;
 
-  if (getDiffMode() === "editor") {
-    const tmpFile = path.join(os.tmpdir(), `git-files-${Date.now()}.diff`);
-    fs.writeFileSync(tmpFile, diffLines.join("\n"), "utf-8");
-    const editor = process.env.VISUAL || process.env.EDITOR || "nvim";
-    try {
-      spawnSync(editor, [tmpFile], { stdio: "inherit", cwd: ctx.cwd });
-    } catch (e) {
-      ctx.ui.notify(`Failed to open editor: ${String(e)}`, "error");
-    }
-    try { fs.unlinkSync(tmpFile); } catch {}
-    return;
+  const tmpFile = path.join(os.tmpdir(), `git-files-${Date.now()}.diff`);
+  fs.writeFileSync(tmpFile, diffLines.join("\n"), "utf-8");
+  const editor = process.env.VISUAL || process.env.EDITOR || "nvim";
+  try {
+    spawnSync(editor, ["-c", "set filetype=diff", tmpFile], { stdio: "inherit", cwd: ctx.cwd });
+  } catch (e) {
+    ctx.ui.notify(`Failed to open editor: ${String(e)}`, "error");
   }
-
-  await ctx.ui.custom<void>(
-    (_tui, theme, _kb, done) => new DiffOverlay(theme, title, diffLines, () => done()),
-    { overlay: true, overlayOptions: { width: 80, maxHeight: 26 } },
-  );
+  try { fs.unlinkSync(tmpFile); } catch {}
 }
 
 // ── Simple text widget ──────────────────────────────────────
@@ -338,31 +245,17 @@ export default function (pi: ExtensionAPI) {
 
     ctx.ui.setWidget("git-files", () => {
       return new GitFilesWidget(ctx.cwd, () => {
-        void showDiffOverlay(ctx as ExtensionCommandContext);
+        void showDiffInNeovim(ctx as ExtensionCommandContext);
       });
     }, { placement: "aboveEditor" });
   });
 
   pi.registerCommand("git-diff", {
-    description: "Pick a changed file and view its colored diff",
+    description: "Pick a changed file and view its diff in neovim",
     handler: async (_args, ctx) => {
-      await showDiffOverlay(ctx);
+      await showDiffInNeovim(ctx);
     },
   });
 
-  pi.registerCommand("git-files-mode", {
-    description: "Toggle or set diff viewer mode (overlay or editor)",
-    handler: async (args, ctx) => {
-      let mode = args.trim() as "overlay" | "editor" | "";
-      if (!mode) {
-        mode = getDiffMode() === "overlay" ? "editor" : "overlay";
-      }
-      if (mode !== "overlay" && mode !== "editor") {
-        ctx.ui.notify("Usage: /git-files-mode [overlay|editor]", "warning");
-        return;
-      }
-      process.env.GIT_FILES_DIFF_MODE = mode;
-      ctx.ui.notify(`Git-files diff mode: ${mode}`, "info");
-    },
-  });
+
 }

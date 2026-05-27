@@ -334,6 +334,68 @@ describe("loadConfig", () => {
       expect(config.dockerSocket).toBe("/cli/socket");
     });
 
+    // ── gitUserName / gitUserEmail ──────────────────────
+
+    it("gitUserName defaults to undefined when not configured", () => {
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir: tmpDir });
+      // No git config set up in test env, so should be undefined
+      // (inferGitConfig won't find anything and returns undefined)
+      expect(config.gitUserName).toBeUndefined();
+      expect(config.gitUserEmail).toBeUndefined();
+    });
+
+    it("reads gitUserName from project config", () => {
+      const containerDir = path.join(tmpDir, ".pi");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "pi-container.yml"),
+        "gitUserName: Alice\ngitUserEmail: alice@example.com"
+      );
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir: tmpDir });
+      expect(config.gitUserName).toBe("Alice");
+      expect(config.gitUserEmail).toBe("alice@example.com");
+    });
+
+    it("reads gitUserName from user config", () => {
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-home-"));
+      fs.mkdirSync(path.join(homeDir, ".pi"), { recursive: true });
+      fs.writeFileSync(
+        path.join(homeDir, ".pi", "pi-container.yml"),
+        "gitUserName: Bob"
+      );
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir });
+      expect(config.gitUserName).toBe("Bob");
+      expect(config.gitUserEmail).toBeUndefined();
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    });
+
+    it("project gitUserName overrides user gitUserName", () => {
+      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-home-"));
+      fs.mkdirSync(path.join(homeDir, ".pi"), { recursive: true });
+      fs.writeFileSync(
+        path.join(homeDir, ".pi", "pi-container.yml"),
+        "gitUserName: UserBob\ngitUserEmail: user@bob.com"
+      );
+
+      const containerDir = path.join(tmpDir, ".pi");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "pi-container.yml"),
+        "gitUserName: ProjectAlice"
+      );
+
+      process.chdir(tmpDir);
+      const config = loadConfig({ homeDir });
+      expect(config.gitUserName).toBe("ProjectAlice");
+      // User gitUserEmail not overridden by project (project doesn't set it)
+      expect(config.gitUserEmail).toBe("user@bob.com");
+
+      fs.rmSync(homeDir, { recursive: true, force: true });
+    });
+
     it("dockerSocket works independently of privileged", () => {
       const containerDir = path.join(tmpDir, ".pi");
       fs.mkdirSync(containerDir, { recursive: true });

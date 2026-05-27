@@ -240,6 +240,26 @@ describe("buildDockerRunArgs", () => {
     expect(socketVolume).toBeUndefined();
   });
 
+  it("passes GIT_USER_NAME and GIT_USER_EMAIL when configured", () => {
+    const config = makeFullConfig({
+      gitUserName: "Test User",
+      gitUserEmail: "test@example.com",
+    });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const envEntries = args.filter((_, i) => args[i - 1] === "-e" && _.includes("="));
+    expect(envEntries).toContain("GIT_USER_NAME=Test User");
+    expect(envEntries).toContain("GIT_USER_EMAIL=test@example.com");
+  });
+
+  it("does not pass GIT_USER_NAME or GIT_USER_EMAIL when not configured", () => {
+    const config = makeFullConfig({ gitUserName: undefined, gitUserEmail: undefined });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const hasGitEnv = args.some((a) => a.startsWith("GIT_USER_"));
+    expect(hasGitEnv).toBe(false);
+  });
+
   it("does not mount docker socket when privileged is default (false)", () => {
     const config = makeFullConfig();
     const args = buildDockerRunArgs(config, ["pi"]);

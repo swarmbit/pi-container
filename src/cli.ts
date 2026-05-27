@@ -67,6 +67,8 @@ Config file schema:
     - 8080:80     # host 8080 → container 80
   env:
     CUSTOM_ENV: sk-xxx  # passed to the container
+  gitUserName: John Doe     # git user name for commits in container
+  gitUserEmail: john@example.com  # git user email for commits in container
   privileged: true  # mount docker socket + install docker CLI
   dockerSocket: /var/run/docker.sock  # custom socket path
   dockerfileExtension: |
@@ -286,6 +288,8 @@ function printDryRun(config: ReturnType<typeof loadConfig>, piArgs: string[]): v
   } else {
     console.log(`  dockerfileExtension: (none)`);
   }
+  console.log(`  gitUserName:     ${config.gitUserName || "(inferred from host)"}`);
+  console.log(`  gitUserEmail:    ${config.gitUserEmail || "(inferred from host)"}`);
   console.log(`  privileged:      ${config.privileged}`);
   console.log(`  dockerSocket:    ${config.dockerSocket}`);
   console.log();
