@@ -14,6 +14,8 @@ function makeConfig(overrides: Partial<PiContainerConfig> = {}): PiContainerConf
   return {
     ports: [],
     env: {},
+    privileged: false,
+    dockerSocket: "/var/run/docker.sock",
     ...overrides,
   };
 }
@@ -30,6 +32,8 @@ function makeFullConfig(overrides: Partial<FullConfig> = {}): FullConfig {
   return {
     ports: [],
     env: {},
+    privileged: false,
+    dockerSocket: "/var/run/docker.sock",
     configDir: "/home/user/.pi",
     containerDir: "",
     projectDir: "/project",
@@ -202,6 +206,45 @@ describe("buildDockerRunArgs", () => {
 
     const teamPackagesEntry = args.find((a) => a.startsWith("TEAM_PACKAGES="));
     expect(teamPackagesEntry).toBeUndefined();
+  });
+
+  it("mounts docker socket when privileged is true", () => {
+    const config = makeFullConfig({ privileged: true });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    // Should have -v for the socket mount
+    const vIdx = args.indexOf("-v");
+    const volumeArgs = args.filter((_, i) => args[i - 1] === "-v");
+    const socketVolume = volumeArgs.find((v) => v.endsWith(":/var/run/docker.sock"));
+    expect(socketVolume).toBeDefined();
+    expect(socketVolume).toBe("/var/run/docker.sock:/var/run/docker.sock");
+  });
+
+  it("uses custom dockerSocket path", () => {
+    const config = makeFullConfig({ privileged: true, dockerSocket: "/custom/docker.sock" });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const volumeArgs = args.filter((_, i) => args[i - 1] === "-v");
+    const socketVolume = volumeArgs.find((v) => v.endsWith(":/var/run/docker.sock"));
+    expect(socketVolume).toBe("/custom/docker.sock:/var/run/docker.sock");
+  });
+
+  it("does not mount docker socket when privileged is false", () => {
+    const config = makeFullConfig({ privileged: false });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const volumeArgs = args.filter((_, i) => args[i - 1] === "-v");
+    const socketVolume = volumeArgs.find((v) => v.includes("docker.sock"));
+    expect(socketVolume).toBeUndefined();
+  });
+
+  it("does not mount docker socket when privileged is default (false)", () => {
+    const config = makeFullConfig();
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const volumeArgs = args.filter((_, i) => args[i - 1] === "-v");
+    const socketVolume = volumeArgs.find((v) => v.includes("docker.sock"));
+    expect(socketVolume).toBeUndefined();
   });
 });
 

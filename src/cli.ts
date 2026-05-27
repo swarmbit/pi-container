@@ -37,6 +37,8 @@ Options:
   --version         Show version
   -p, --port PORT   Publish container port to localhost (repeatable)
                     PORT can be a simple port (3000) or host:container (8080:3000)
+  --privileged      Mount docker socket and install Docker CLI (Docker-out-of-Docker)
+  --docker-socket    Host path to Docker socket (default: /var/run/docker.sock)
 
 All arguments after -- are passed to pi.
 
@@ -62,6 +64,8 @@ Config file schema:
     - 8080:80     # host 8080 → container 80
   env:
     CUSTOM_ENV: sk-xxx  # passed to the container
+  privileged: true  # mount docker socket + install docker CLI
+  dockerSocket: /var/run/docker.sock  # custom socket path
   dockerfileExtension: |
     RUN apt-get update && apt-get install -y python3  # extra image steps
 `.trim());
@@ -91,6 +95,8 @@ async function main(): Promise<void> {
   // Parse our args
   let command: "run" | "build" | "shell" | "dry-run" = "run";
   const cliPorts: string[] = [];
+  let cliPrivileged: boolean | undefined;
+  let cliDockerSocket: string | undefined;
 
   for (let i = 0; i < ourArgs.length; i++) {
     const arg = ourArgs[i];
@@ -110,6 +116,17 @@ async function main(): Promise<void> {
         process.exit(1);
       }
       cliPorts.push(value);
+      i++; // skip the value
+    } else if (arg === "--privileged") {
+      cliPrivileged = true;
+    } else if (arg === "--docker-socket") {
+      const value = ourArgs[i + 1];
+      if (!value || value.startsWith("-")) {
+        console.error(`Error: ${arg} requires a socket path argument.`);
+        console.error("Example: pi-container --docker-socket /var/run/docker.sock");
+        process.exit(1);
+      }
+      cliDockerSocket = value;
       i++; // skip the value
     } else if (arg === "build") {
       command = "build";
@@ -136,7 +153,7 @@ async function main(): Promise<void> {
   }
 
   // Load config from .pi/, user config
-  const config = loadConfig({ cliPorts });
+  const config = loadConfig({ cliPorts, cliPrivileged, cliDockerSocket });
 
   fs.mkdirSync(config.configDir + "/agent", { recursive: true });
 
@@ -159,7 +176,7 @@ async function main(): Promise<void> {
   // Dispatch command
   switch (command) {
     case "build":
-      buildImage(config.dockerfileExtension);
+      buildImage(config.dockerfileExtension, config.privileged);
       break;
     case "shell":
       shellInContainer(config);
@@ -216,6 +233,8 @@ function printDryRun(config: ReturnType<typeof loadConfig>, piArgs: string[]): v
   } else {
     console.log(`  dockerfileExtension: (none)`);
   }
+  console.log(`  privileged:      ${config.privileged}`);
+  console.log(`  dockerSocket:    ${config.dockerSocket}`);
   console.log();
   console.log("Config sources:");
   console.log(`  User config:    ${userConfigPath} ${userConfigExists ? "(found)" : "(not found)"}`);
