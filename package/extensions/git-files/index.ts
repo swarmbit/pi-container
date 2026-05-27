@@ -6,7 +6,7 @@
 // ============================================================
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { Container, Text, type Focusable, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Text, type Focusable, matchesKey, visibleWidth, truncateToWidth } from "@earendil-works/pi-tui";
 import { execSync } from "node:child_process";
 import * as path from "node:path";
 
@@ -103,12 +103,13 @@ class DiffOverlay implements Focusable {
   }
 
   render(width: number): string[] {
-    const w = Math.max(40, width - 4);
+    // Fixed overlay dimensions — won't resize with terminal or scrolling
+    const w = 80;
     const innerW = w - 2;
-    const maxVisible = Math.max(5, process.stdout.rows ? process.stdout.rows - 6 : 20);
+    const maxVisible = 20;
     const th = this.th;
     const out: string[] = [];
-    const pad = (s: string, len: number) => s + " ".repeat(Math.max(0, len - visibleWidth(s)));
+    const pad = (s: string, len: number) => truncateToWidth(s + " ".repeat(Math.max(0, len - visibleWidth(s))), len);
     const row = (content: string) => th.fg("border", "│") + pad(content, innerW) + th.fg("border", "│");
 
     out.push(th.fg("border", `╭${"─".repeat(innerW)}╮`));
@@ -171,11 +172,12 @@ class FilePickerOverlay implements Focusable {
   }
 
   render(width: number): string[] {
-    const w = Math.max(40, width - 4);
+    // Fixed overlay dimensions — won't resize with terminal
+    const w = 70;
     const innerW = w - 2;
     const th = this.th;
     const out: string[] = [];
-    const pad = (s: string, len: number) => s + " ".repeat(Math.max(0, len - visibleWidth(s)));
+    const pad = (s: string, len: number) => truncateToWidth(s + " ".repeat(Math.max(0, len - visibleWidth(s))), len);
     const row = (content: string) => th.fg("border", "│") + pad(content, innerW) + th.fg("border", "│");
 
     out.push(th.fg("border", `╭${"─".repeat(innerW)}╮`));
@@ -225,7 +227,7 @@ async function showDiffOverlay(ctx: ExtensionCommandContext) {
   // Step 1: file picker overlay
   const pickResult = await ctx.ui.custom<{ action: string; file?: ChangedFile } | undefined>(
     (_tui, theme, _kb, done) => new FilePickerOverlay(theme, files, ctx.cwd, done),
-    { overlay: true },
+    { overlay: true, overlayOptions: { width: 70, maxHeight: 22 } },
   );
 
   if (!pickResult || pickResult.action !== "view" || !pickResult.file) return;
@@ -237,7 +239,7 @@ async function showDiffOverlay(ctx: ExtensionCommandContext) {
 
   await ctx.ui.custom<void>(
     (_tui, theme, _kb, done) => new DiffOverlay(theme, title, diffLines, () => done()),
-    { overlay: true },
+    { overlay: true, overlayOptions: { width: 80, maxHeight: 26 } },
   );
 }
 
