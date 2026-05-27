@@ -73,6 +73,7 @@ function mockSessionManager(sessionFile: string) {
   return {
     getSessionFile: () => sessionFile,
     getCwd: () => "/pi-container",
+    appendSessionInfo: vi.fn(),
   };
 }
 
@@ -407,6 +408,9 @@ describe("forkWorktree", () => {
       "/sessions/current.jsonl",
       "/pi-container/.pi/worktrees/proj/feat-abc123"
     );
+
+    // Session name set to worktree name
+    expect(mockSm.appendSessionInfo).toHaveBeenCalledWith("feat-abc123");
 
     // Switch called
     expect(ctx.switchSession).toHaveBeenCalledWith(

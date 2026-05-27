@@ -298,6 +298,10 @@ export async function forkWorktree(
     return { error: `Failed to fork session: ${err.message ?? String(err)}` };
   }
 
+  // Set the session display name to the worktree name
+  forkedSm.appendSessionInfo(worktreeName);
+  log(`forkWorktree: set session name to "${worktreeName}"`);
+
   const sessionFile = forkedSm.getSessionFile();
   if (!sessionFile) {
     return { error: "Failed to create session file for forked session." };
