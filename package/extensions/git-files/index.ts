@@ -7,7 +7,9 @@
 
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { Container, Text, type Focusable, matchesKey, visibleWidth, truncateToWidth } from "@earendil-works/pi-tui";
-import { execSync } from "node:child_process";
+import { execSync, spawnSync } from "node:child_process";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 
 // ── Types ──────────────────────────────────────────────────
@@ -59,6 +61,14 @@ function getFileDiff(cwd: string, filepath: string, staged: boolean): string[] {
   } catch {
     return ["(failed to read diff)"];
   }
+}
+
+// ── Configuration ──────────────────────────────────────────
+
+function getDiffMode(): "overlay" | "editor" {
+  const mode = process.env.GIT_FILES_DIFF_MODE;
+  if (mode === "editor") return "editor";
+  return "overlay";
 }
 
 // ── Diff overlay ────────────────────────────────────────────
@@ -232,10 +242,23 @@ async function showDiffOverlay(ctx: ExtensionCommandContext) {
 
   if (!pickResult || pickResult.action !== "view" || !pickResult.file) return;
 
-  // Step 2: diff viewer overlay
+  // Step 2: diff viewer
   const file = pickResult.file;
   const diffLines = getFileDiff(ctx.cwd, file.path, file.staged);
   const title = `${file.staged ? "Staged" : "Unstaged"}: ${file.path}`;
+
+  if (getDiffMode() === "editor") {
+    const tmpFile = path.join(os.tmpdir(), `git-files-${Date.now()}.diff`);
+    fs.writeFileSync(tmpFile, diffLines.join("\n"), "utf-8");
+    const editor = process.env.VISUAL || process.env.EDITOR || "nvim";
+    try {
+      spawnSync(editor, [tmpFile], { stdio: "inherit", cwd: ctx.cwd });
+    } catch (e) {
+      ctx.ui.notify(`Failed to open editor: ${String(e)}`, "error");
+    }
+    try { fs.unlinkSync(tmpFile); } catch {}
+    return;
+  }
 
   await ctx.ui.custom<void>(
     (_tui, theme, _kb, done) => new DiffOverlay(theme, title, diffLines, () => done()),
@@ -271,8 +294,16 @@ class GitFilesWidget extends Container {
       this.textComponent.setText("");
       return;
     }
+    const changed = this.files.filter((f) => f.status !== "?");
+    const untracked = this.files.filter((f) => f.status === "?");
     const lines: string[] = [];
-    lines.push(`  ${this.files.length} changed`);
+    if (changed.length > 0 && untracked.length > 0) {
+      lines.push(`  ${changed.length} changed, ${untracked.length} untracked`);
+    } else if (changed.length > 0) {
+      lines.push(`  ${changed.length} changed`);
+    } else {
+      lines.push(`  ${untracked.length} untracked`);
+    }
     const maxShow = Math.min(this.files.length, 6);
     for (let i = 0; i < maxShow; i++) {
       const f = this.files[i];
@@ -316,6 +347,22 @@ export default function (pi: ExtensionAPI) {
     description: "Pick a changed file and view its colored diff",
     handler: async (_args, ctx) => {
       await showDiffOverlay(ctx);
+    },
+  });
+
+  pi.registerCommand("git-files-mode", {
+    description: "Toggle or set diff viewer mode (overlay or editor)",
+    handler: async (args, ctx) => {
+      let mode = args.trim() as "overlay" | "editor" | "";
+      if (!mode) {
+        mode = getDiffMode() === "overlay" ? "editor" : "overlay";
+      }
+      if (mode !== "overlay" && mode !== "editor") {
+        ctx.ui.notify("Usage: /git-files-mode [overlay|editor]", "warning");
+        return;
+      }
+      process.env.GIT_FILES_DIFF_MODE = mode;
+      ctx.ui.notify(`Git-files diff mode: ${mode}`, "info");
     },
   });
 }

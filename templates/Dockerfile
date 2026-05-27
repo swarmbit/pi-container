@@ -26,6 +26,8 @@ FROM node:22-bookworm-slim AS runtime
 
 ARG PI_VERSION={{piVersion}}
 ENV PI_VERSION=${PI_VERSION}
+ENV EDITOR=nvim
+ENV VISUAL=nvim
 
 # Install runtime dependencies (docker.io included so the CLI is always
 # available; the socket is mounted at runtime only with --privileged)
@@ -34,6 +36,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     gosu \
     docker.io \
+    neovim \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
