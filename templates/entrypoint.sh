@@ -27,6 +27,12 @@ if [ ! -f "${PI_SETTINGS}" ]; then
   chown pi-user:pi-user "${PI_SETTINGS}" 2>/dev/null || true
 fi
 
+# ── Change docker docket ownership ────────────────
+DOCKER_SOCKET_PATH=/var/run/docker.sock
+if [ ! -f "${DOCKER_SOCKET_PATH}" ]; then
+  chown pi-user:pi-user "${DOCKER_SOCKET_PATH}" 2>/dev/null || true
+fi
+
 gosu pi-user pi install /opt/pi-package
 
 # ── Set git user info from host ────────────────────────

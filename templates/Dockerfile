@@ -29,14 +29,25 @@ ENV PI_VERSION=${PI_VERSION}
 ENV EDITOR=nvim
 ENV VISUAL=nvim
 
-# Install runtime dependencies (docker.io included so the CLI is always
+# Install runtime dependencies (Docker CLI from official repo so the CLI is always
 # available; mount the docker socket via the mounts config if needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    git \
+    ca-certificates \
     curl \
+    git \
     gosu \
-    docker.io \
+    gnupg \
     neovim \
+    && rm -rf /var/lib/apt/lists/* \
+    && install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
+    && chmod a+r /etc/apt/keyrings/docker.asc \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/debian bookworm stable" > /etc/apt/sources.list.d/docker.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends \
+    docker-ce-cli \
+    docker-buildx-plugin \
+    docker-compose-plugin \
     && rm -rf /var/lib/apt/lists/*
 
 # Create non-root user
@@ -63,4 +74,4 @@ WORKDIR /workspace
 
 # Entrypoint runs as root to fix permissions, then drops to pi-user
 ENTRYPOINT ["/opt/pi/entrypoint.sh"]
-CMD ["pi"]
+# CMD ["pi"]
