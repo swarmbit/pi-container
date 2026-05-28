@@ -37,7 +37,7 @@ export function imageExists(tag: string): boolean {
 
 // ── Build ───────────────────────────────────────────────────
 
-export function buildImage(dockerfileExtension?: string, privileged?: boolean): void {
+export function buildImage(dockerfileExtension?: string): void {
   console.log(`🔨 Building ${PI_IMAGE} (pi v${PI_VERSION})...`);
 
   const buildCtx = createBuildContext(dockerfileExtension);
@@ -80,11 +80,11 @@ export function buildImage(dockerfileExtension?: string, privileged?: boolean): 
   }
 }
 
-export function buildIfNeeded(dockerfileExtension?: string, privileged?: boolean): void {
+export function buildIfNeeded(dockerfileExtension?: string): void {
   debugLog(`buildIfNeeded: checking for ${PI_IMAGE}`);
   if (!imageExists(PI_IMAGE)) {
     console.log("📦 Image not found. Building...");
-    buildImage(dockerfileExtension, privileged);
+    buildImage(dockerfileExtension);
   } else {
     debugLog(`Image ${PI_IMAGE} already exists, skipping build`);
   }
@@ -155,7 +155,7 @@ function spawnDocker(args: string[], debug: boolean): Promise<SpawnSyncReturns<B
 
 export async function runContainer(config: PiContainerConfig & RuntimeContext, piArgs: string[]): Promise<void> {
   debugLog("runContainer called with piArgs:", piArgs);
-  buildIfNeeded(config.dockerfileExtension, config.privileged);
+  buildIfNeeded(config.dockerfileExtension);
 
   const args = buildDockerRunArgs(config, piArgs);
   debugLog(`Running: docker ${args.join(" ")}`);
@@ -172,7 +172,7 @@ export async function runContainer(config: PiContainerConfig & RuntimeContext, p
 
 export async function shellInContainer(config: PiContainerConfig & RuntimeContext): Promise<void> {
   debugLog("shellInContainer called");
-  buildIfNeeded(config.dockerfileExtension, config.privileged);
+  buildIfNeeded(config.dockerfileExtension);
 
   console.log("🐚 Opening shell in pi container...");
   const args = buildDockerRunArgs(config, ["/bin/bash"]);
@@ -294,10 +294,13 @@ export function buildDockerRunArgs(config: PiContainerConfig & RuntimeContext, c
   args.push("-e", `HOST_GID=${gid}`);
   debugLog(`Host UID=${uid}, GID=${gid}`);
 
-  // Docker socket mount for privileged mode (Docker-out-of-Docker)
-  if (config.privileged) {
-    debugLog(`Privileged mode: mounting Docker socket ${config.dockerSocket}`);
-    args.push("-v", `${config.dockerSocket}:/var/run/docker.sock`);
+  // Custom volume mounts from config
+  if (config.mounts.length > 0) {
+    debugLog(`Custom mounts: ${config.mounts.map(m => `${m.host}:${m.container}${m.mode ? ":" + m.mode : ""}`).join(", ")}`);
+  }
+  for (const mount of config.mounts) {
+    const mountSpec = `${mount.host}:${mount.container}${mount.mode ? ":" + mount.mode : ""}`;
+    args.push("-v", mountSpec);
   }
 
   // Image

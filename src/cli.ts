@@ -39,9 +39,6 @@ Options:
   --debug, -d       Enable debug logging
   -p, --port PORT   Publish container port to localhost (repeatable)
                     PORT can be a simple port (3000) or host:container (8080:3000)
-  --privileged      Mount docker socket and install Docker CLI (Docker-out-of-Docker)
-  --docker-socket    Host path to Docker socket (default: /var/run/docker.sock)
-
 All arguments after -- are passed to pi.
 
 Examples:
@@ -65,12 +62,13 @@ Config file schema:
     - 3000        # dev server
     - 6006        # storybook
     - 8080:80     # host 8080 → container 80
+  mounts:
+    - /var/run/docker.sock:/var/run/docker.sock  # docker socket
+    - ~/.ssh:/home/pi-user/.ssh:ro                # ssh keys (read-only)
   env:
     CUSTOM_ENV: sk-xxx  # passed to the container
   gitUserName: John Doe     # git user name for commits in container
   gitUserEmail: john@example.com  # git user email for commits in container
-  privileged: true  # mount docker socket + install docker CLI
-  dockerSocket: /var/run/docker.sock  # custom socket path
   dockerfileExtension: |
     RUN apt-get update && apt-get install -y python3  # extra image steps
 `.trim());
@@ -101,8 +99,6 @@ async function main(): Promise<void> {
   let command: "run" | "build" | "shell" | "dry-run" = "run";
   let shellContainerId: string | undefined;
   const cliPorts: string[] = [];
-  let cliPrivileged: boolean | undefined;
-  let cliDockerSocket: string | undefined;
   let cliDebug = false;
 
   for (let i = 0; i < ourArgs.length; i++) {
@@ -125,17 +121,6 @@ async function main(): Promise<void> {
         process.exit(1);
       }
       cliPorts.push(value);
-      i++; // skip the value
-    } else if (arg === "--privileged") {
-      cliPrivileged = true;
-    } else if (arg === "--docker-socket") {
-      const value = ourArgs[i + 1];
-      if (!value || value.startsWith("-")) {
-        console.error(`Error: ${arg} requires a socket path argument.`);
-        console.error("Example: pi-container --docker-socket /var/run/docker.sock");
-        process.exit(1);
-      }
-      cliDockerSocket = value;
       i++; // skip the value
     } else if (arg === "build") {
       command = "build";
@@ -194,12 +179,11 @@ async function main(): Promise<void> {
 
   // Load config from .pi/, user config
   debugLog("Loading config...");
-  const config = loadConfig({ cliPorts, cliPrivileged, cliDockerSocket, debug: cliDebug });
+  const config = loadConfig({ cliPorts, debug: cliDebug });
   debugLog("Config loaded:", {
     ports: config.ports,
     envKeys: Object.keys(config.env),
-    privileged: config.privileged,
-    dockerSocket: config.dockerSocket,
+    mounts: config.mounts,
     configDir: config.configDir,
     containerDir: config.containerDir || "(none)",
     projectDir: config.projectDir,
@@ -231,7 +215,7 @@ async function main(): Promise<void> {
   debugLog(`Dispatching command: ${command}`);
   switch (command) {
     case "build":
-      buildImage(config.dockerfileExtension, config.privileged);
+      buildImage(config.dockerfileExtension);
       break;
     case "shell":
       await shellInContainer(config);
@@ -290,8 +274,15 @@ function printDryRun(config: ReturnType<typeof loadConfig>, piArgs: string[]): v
   }
   console.log(`  gitUserName:     ${config.gitUserName || "(inferred from host)"}`);
   console.log(`  gitUserEmail:    ${config.gitUserEmail || "(inferred from host)"}`);
-  console.log(`  privileged:      ${config.privileged}`);
-  console.log(`  dockerSocket:    ${config.dockerSocket}`);
+  if (config.mounts.length > 0) {
+    console.log("  mounts:");
+    for (const m of config.mounts) {
+      const spec = `${m.host}:${m.container}${m.mode ? ":" + m.mode : ""}`;
+      console.log(`    ${spec}`);
+    }
+  } else {
+    console.log(`  mounts:          (none)`);
+  }
   console.log();
   console.log("Config sources:");
   console.log(`  User config:    ${userConfigPath} ${userConfigExists ? "(found)" : "(not found)"}`);

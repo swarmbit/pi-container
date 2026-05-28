@@ -125,11 +125,11 @@ Pi-container reads config from two files (both in YAML format) and CLI flags. Al
 
 ### Precedence (highest wins)
 
-1. CLI flags (`-p`, `--port`, `--privileged`, `--docker-socket`)
+1. CLI flags (`-p`, `--port`)
 2. User config (`~/.pi/pi-container.yml`)
 3. Project config (`.pi/pi-container.yml`)
 
-For `env`, user keys override project keys with the same name; project-only keys are preserved.
+For `env` and `mounts`, user config entries are merged with project config. For `env`, user keys override project keys with the same name; for `mounts`, user mounts override project mounts on matching container paths, and add new mounts for different paths.
 
 ---
 
@@ -147,6 +147,17 @@ ports:
   - 8080:80         # localhost:8080 → container:80
   - 9000-9010       # port range — expands to 11 entries
 
+# ── Custom mounts ─────────────────────────────────────────
+# Mount arbitrary host paths into the container. Useful for
+# Docker socket, SSH keys, caches, etc. Format:
+#   HOST_PATH:CONTAINER_PATH[:MODE]
+#   Mode is optional (default: read-write). Common modes: ro, rw, cached.
+# User mounts override project mounts on matching container paths,
+# and add new mounts for different paths.
+mounts:
+  - /var/run/docker.sock:/var/run/docker.sock  # Docker-out-of-Docker
+  - ~/.ssh:/home/pi-user/.ssh:ro  # SSH keys (read-only)
+
 # ── Environment variables ──────────────────────────────────
 # Inject environment variables into the container at runtime.
 # Useful for passing API keys, feature flags, or other config
@@ -154,19 +165,6 @@ ports:
 env:
   CUSTOM_VAR: some-value
   NODE_ENV: development
-
-# ── Privileged mode (Docker-out-of-Docker) ─────────────────
-# Mounts the host Docker socket into the container so pi can
-# build and run Docker images from inside the container.
-# Docker CLI is pre-installed in the image — enable this only
-# if your workflow requires pi to interact with Docker.
-privileged: true
-
-# ── Docker socket path ─────────────────────────────────────
-# Override the default Docker socket path on the host. Only
-# applies when privileged mode is enabled. Use this if your
-# Docker daemon listens on a non-standard socket.
-dockerSocket: /var/run/docker.sock   # default
 
 # ── Dockerfile extension ───────────────────────────────────
 # Inject extra RUN / COPY / ENV steps into the Docker image
@@ -195,9 +193,8 @@ gitUserEmail: john@example.com
 | Key | Type | Default | Description |
 |-----|------|---------|-------------|
 | `ports` | `list` | `[]` | Container ports to expose on `127.0.0.1`. Accepts simple ports (`3000`), host:container mappings (`8080:80`), and ranges (`9000-9010`). Useful for dev servers, Storybook, etc. |
+| `mounts` | `list` | `[]` | Custom host-to-container volume mounts. Each entry is a string in `HOST:CONTAINER[:MODE]` format (e.g., `/var/run/docker.sock:/var/run/docker.sock` or `~/.ssh:/home/pi-user/.ssh:ro`). User mounts override project mounts on matching container paths. |
 | `env` | `map` | `{}` | Key-value pairs injected as environment variables into the container via `docker run -e`. User config overrides project config per-key. |
-| `privileged` | `bool` | `false` | When `true`, mounts the host Docker socket (`/var/run/docker.sock`) into the container so pi can run Docker commands (build images, start containers). Docker CLI is already installed in the image. |
-| `dockerSocket` | `string` | `/var/run/docker.sock` | Host path to the Docker socket. Only used when `privileged: true`. Change this if your Docker daemon uses a non-standard socket path. |
 | `dockerfileExtension` | `string` | — | Arbitrary Dockerfile content appended during `pi-container build`. Use it to install extra system packages (`python3`, `ffmpeg`, etc.) or set image-level `ENV` vars. Requires a manual rebuild to take effect. |
 | `gitUserName` | `string` | *(host git config)* | Git author name for commits made inside the container. Falls back to `git config user.name` from the host if not set. |
 | `gitUserEmail` | `string` | *(host git config)* | Git author email for commits made inside the container. Falls back to `git config user.email` from the host if not set. |
@@ -207,8 +204,6 @@ gitUserEmail: john@example.com
 | Flag | Description |
 |------|-------------|
 | `-p`, `--port PORT` | Publish a container port on localhost (repeatable). Formats: `3000` or `8080:3000`. Port ranges are not supported via CLI — use the config file. |
-| `--privileged` | Enable privileged mode (mount Docker socket). Equivalent to `privileged: true` in config. |
-| `--docker-socket PATH` | Override the host Docker socket path. Equivalent to `dockerSocket` in config. |
 | `--debug`, `-d` | Enable debug logging. Prints resolved config, docker commands, and container output to stderr. |
 
 ### Commands
@@ -233,6 +228,9 @@ ports:
   - 3000            # Next.js dev server
   - 6006            # Storybook
   - 8080:80         # Reverse proxy
+
+mounts:
+  - /var/run/docker.sock:/var/run/docker.sock  # Docker access
 
 env:
   NODE_ENV: development

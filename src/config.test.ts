@@ -6,7 +6,7 @@ import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import * as path from "path";
 import * as fs from "fs";
 import * as os from "os";
-import { loadConfig, getUserConfigPath, parsePortMapping, parsePortsString, PI_VERSION, PI_IMAGE, DEFAULT_DOCKER_SOCKET } from "./config";
+import { loadConfig, getUserConfigPath, parsePortMapping, parsePortsString, parseMountMapping, PI_VERSION, PI_IMAGE } from "./config";
 
 let tmpDir: string;
 let origCwd: string;
@@ -35,7 +35,7 @@ describe("PI_VERSION and PI_IMAGE constants", () => {
     const config = loadConfig({ homeDir: tmpDir });
     // Config no longer has version/image — they're constants
     expect(config.ports).toEqual([]);
-    expect(config.dockerSocket).toBe(DEFAULT_DOCKER_SOCKET);
+    expect(config.mounts).toEqual([]);
   });
 });
 
@@ -190,148 +190,73 @@ describe("loadConfig", () => {
       expect(config.ports).toEqual([]);
     });
 
-    it("privileged defaults to false when not configured", () => {
+    // ── mounts ───────────────────────────────────────────
+
+    it("mounts defaults to empty when not configured", () => {
       process.chdir(tmpDir);
       const config = loadConfig({ homeDir: tmpDir });
-      expect(config.privileged).toBe(false);
+      expect(config.mounts).toEqual([]);
     });
 
-    it("reads privileged from project config", () => {
+    it("reads mounts from project config", () => {
       const containerDir = path.join(tmpDir, ".pi");
       fs.mkdirSync(containerDir, { recursive: true });
       fs.writeFileSync(
         path.join(containerDir, "pi-container.yml"),
-        "privileged: true"
+        "mounts:\n  - /var/run/docker.sock:/var/run/docker.sock\n  - /host/ssh:/container/ssh:ro"
       );
       process.chdir(tmpDir);
       const config = loadConfig({ homeDir: tmpDir });
-      expect(config.privileged).toBe(true);
+      expect(config.mounts).toEqual([
+        { host: "/var/run/docker.sock", container: "/var/run/docker.sock" },
+        { host: "/host/ssh", container: "/container/ssh", mode: "ro" },
+      ]);
     });
 
-    it("reads privileged from user config", () => {
+    it("user mounts override project mounts on matching container path", () => {
       const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-home-"));
       fs.mkdirSync(path.join(homeDir, ".pi"), { recursive: true });
       fs.writeFileSync(
         path.join(homeDir, ".pi", "pi-container.yml"),
-        "privileged: true"
+        "mounts:\n  - /user/socket:/var/run/docker.sock"
       );
+
+      const containerDir = path.join(tmpDir, ".pi");
+      fs.mkdirSync(containerDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(containerDir, "pi-container.yml"),
+        "mounts:\n  - /project/socket:/var/run/docker.sock"
+      );
+
       process.chdir(tmpDir);
       const config = loadConfig({ homeDir });
-      expect(config.privileged).toBe(true);
+      expect(config.mounts).toEqual([
+        { host: "/user/socket", container: "/var/run/docker.sock" },
+      ]);
+
       fs.rmSync(homeDir, { recursive: true, force: true });
     });
 
-    it("project privileged overrides user privileged when both set", () => {
+    it("user mounts add to project mounts for different container paths", () => {
       const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-home-"));
       fs.mkdirSync(path.join(homeDir, ".pi"), { recursive: true });
       fs.writeFileSync(
         path.join(homeDir, ".pi", "pi-container.yml"),
-        "privileged: false"
+        "mounts:\n  - /host/config:/container/config"
       );
 
       const containerDir = path.join(tmpDir, ".pi");
       fs.mkdirSync(containerDir, { recursive: true });
       fs.writeFileSync(
         path.join(containerDir, "pi-container.yml"),
-        "privileged: true"
+        "mounts:\n  - /var/run/docker.sock:/var/run/docker.sock"
       );
 
       process.chdir(tmpDir);
       const config = loadConfig({ homeDir });
-      expect(config.privileged).toBe(true);
+      expect(config.mounts).toHaveLength(2);
 
       fs.rmSync(homeDir, { recursive: true, force: true });
-    });
-
-    it("CLI privileged overrides config", () => {
-      const containerDir = path.join(tmpDir, ".pi");
-      fs.mkdirSync(containerDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(containerDir, "pi-container.yml"),
-        "privileged: false"
-      );
-      process.chdir(tmpDir);
-      const config = loadConfig({ homeDir: tmpDir, cliPrivileged: true });
-      expect(config.privileged).toBe(true);
-    });
-
-    it("CLI privileged false overrides config true", () => {
-      const containerDir = path.join(tmpDir, ".pi");
-      fs.mkdirSync(containerDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(containerDir, "pi-container.yml"),
-        "privileged: true"
-      );
-      process.chdir(tmpDir);
-      const config = loadConfig({ homeDir: tmpDir, cliPrivileged: false });
-      expect(config.privileged).toBe(false);
-    });
-
-    // ── dockerSocket ──────────────────────────────────────
-
-    it("dockerSocket defaults to /var/run/docker.sock", () => {
-      process.chdir(tmpDir);
-      const config = loadConfig({ homeDir: tmpDir });
-      expect(config.dockerSocket).toBe(DEFAULT_DOCKER_SOCKET);
-    });
-
-    it("reads dockerSocket from project config", () => {
-      const containerDir = path.join(tmpDir, ".pi");
-      fs.mkdirSync(containerDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(containerDir, "pi-container.yml"),
-        "dockerSocket: /run/docker.sock"
-      );
-      process.chdir(tmpDir);
-      const config = loadConfig({ homeDir: tmpDir });
-      expect(config.dockerSocket).toBe("/run/docker.sock");
-    });
-
-    it("reads dockerSocket from user config", () => {
-      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-home-"));
-      fs.mkdirSync(path.join(homeDir, ".pi"), { recursive: true });
-      fs.writeFileSync(
-        path.join(homeDir, ".pi", "pi-container.yml"),
-        "dockerSocket: /custom/docker.sock"
-      );
-      process.chdir(tmpDir);
-      const config = loadConfig({ homeDir });
-      expect(config.dockerSocket).toBe("/custom/docker.sock");
-      fs.rmSync(homeDir, { recursive: true, force: true });
-    });
-
-    it("project dockerSocket overrides user", () => {
-      const homeDir = fs.mkdtempSync(path.join(os.tmpdir(), "pi-container-home-"));
-      fs.mkdirSync(path.join(homeDir, ".pi"), { recursive: true });
-      fs.writeFileSync(
-        path.join(homeDir, ".pi", "pi-container.yml"),
-        "dockerSocket: /user/socket"
-      );
-
-      const containerDir = path.join(tmpDir, ".pi");
-      fs.mkdirSync(containerDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(containerDir, "pi-container.yml"),
-        "dockerSocket: /project/socket"
-      );
-
-      process.chdir(tmpDir);
-      const config = loadConfig({ homeDir });
-      expect(config.dockerSocket).toBe("/project/socket");
-
-      fs.rmSync(homeDir, { recursive: true, force: true });
-    });
-
-    it("CLI dockerSocket overrides config", () => {
-      const containerDir = path.join(tmpDir, ".pi");
-      fs.mkdirSync(containerDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(containerDir, "pi-container.yml"),
-        "dockerSocket: /project/socket"
-      );
-      process.chdir(tmpDir);
-      const config = loadConfig({ homeDir: tmpDir, cliDockerSocket: "/cli/socket" });
-      expect(config.dockerSocket).toBe("/cli/socket");
     });
 
     // ── gitUserName / gitUserEmail ──────────────────────
@@ -396,17 +321,10 @@ describe("loadConfig", () => {
       fs.rmSync(homeDir, { recursive: true, force: true });
     });
 
-    it("dockerSocket works independently of privileged", () => {
-      const containerDir = path.join(tmpDir, ".pi");
-      fs.mkdirSync(containerDir, { recursive: true });
-      fs.writeFileSync(
-        path.join(containerDir, "pi-container.yml"),
-        "privileged: false\ndockerSocket: /custom/docker.sock"
-      );
+    it("mounts are empty when config files are missing", () => {
       process.chdir(tmpDir);
       const config = loadConfig({ homeDir: tmpDir });
-      expect(config.privileged).toBe(false);
-      expect(config.dockerSocket).toBe("/custom/docker.sock");
+      expect(config.mounts).toEqual([]);
     });
   });
 
@@ -529,5 +447,54 @@ describe("getUserConfigPath", () => {
   it("uses default home dir when no argument", () => {
     const configPath = getUserConfigPath();
     expect(configPath).toMatch(/\.pi.pi-container\.yml$/);
+  });
+});
+
+describe("parseMountMapping", () => {
+  it("parses host:container", () => {
+    expect(parseMountMapping("/host/path:/container/path")).toEqual({
+      host: "/host/path",
+      container: "/container/path",
+    });
+  });
+
+  it("parses host:container:mode", () => {
+    expect(parseMountMapping("/host/path:/container/path:ro")).toEqual({
+      host: "/host/path",
+      container: "/container/path",
+      mode: "ro",
+    });
+  });
+
+  it("trims whitespace", () => {
+    expect(parseMountMapping("  /host:/container  ")).toEqual({
+      host: "/host",
+      container: "/container",
+    });
+  });
+
+  it("rejects empty host", () => {
+    expect(() => parseMountMapping(":/container")).toThrow();
+  });
+
+  it("rejects empty container", () => {
+    expect(() => parseMountMapping("/host:")).toThrow();
+  });
+
+  it("rejects single path (missing colon)", () => {
+    expect(() => parseMountMapping("/only-one-path")).toThrow();
+  });
+
+  it("rejects too many colons", () => {
+    expect(() => parseMountMapping("/a:/b:ro:extra")).toThrow();
+  });
+
+  it("supports paths with colons in mode-like positions", () => {
+    // Only the first two colons are separators; rest is mode
+    expect(parseMountMapping("/host:/container:ro,z")).toEqual({
+      host: "/host",
+      container: "/container",
+      mode: "ro,z",
+    });
   });
 });

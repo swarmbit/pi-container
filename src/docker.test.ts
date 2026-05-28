@@ -14,8 +14,7 @@ function makeConfig(overrides: Partial<PiContainerConfig> = {}): PiContainerConf
   return {
     ports: [],
     env: {},
-    privileged: false,
-    dockerSocket: "/var/run/docker.sock",
+    mounts: [],
     ...overrides,
   };
 }
@@ -33,8 +32,7 @@ function makeFullConfig(overrides: Partial<FullConfig> = {}): FullConfig {
   return {
     ports: [],
     env: {},
-    privileged: false,
-    dockerSocket: "/var/run/docker.sock",
+    mounts: [],
     configDir: "/home/user/.pi",
     containerDir: "",
     projectDir: "/project",
@@ -210,29 +208,57 @@ describe("buildDockerRunArgs", () => {
     expect(teamPackagesEntry).toBeUndefined();
   });
 
-  it("mounts docker socket when privileged is true", () => {
-    const config = makeFullConfig({ privileged: true });
+  it("mounts docker socket via custom mounts", () => {
+    const config = makeFullConfig({
+      mounts: [{ host: "/var/run/docker.sock", container: "/var/run/docker.sock" }],
+    });
     const args = buildDockerRunArgs(config, ["pi"]);
 
-    // Should have -v for the socket mount
-    const vIdx = args.indexOf("-v");
     const volumeArgs = args.filter((_, i) => args[i - 1] === "-v");
     const socketVolume = volumeArgs.find((v) => v.endsWith(":/var/run/docker.sock"));
     expect(socketVolume).toBeDefined();
     expect(socketVolume).toBe("/var/run/docker.sock:/var/run/docker.sock");
   });
 
-  it("uses custom dockerSocket path", () => {
-    const config = makeFullConfig({ privileged: true, dockerSocket: "/custom/docker.sock" });
+  it("mounts custom path with mode", () => {
+    const config = makeFullConfig({
+      mounts: [{ host: "/host/ssh", container: "/container/ssh", mode: "ro" }],
+    });
     const args = buildDockerRunArgs(config, ["pi"]);
 
     const volumeArgs = args.filter((_, i) => args[i - 1] === "-v");
-    const socketVolume = volumeArgs.find((v) => v.endsWith(":/var/run/docker.sock"));
-    expect(socketVolume).toBe("/custom/docker.sock:/var/run/docker.sock");
+    const sshVolume = volumeArgs.find((v) => v.includes("/container/ssh"));
+    expect(sshVolume).toBe("/host/ssh:/container/ssh:ro");
   });
 
-  it("does not mount docker socket when privileged is false", () => {
-    const config = makeFullConfig({ privileged: false });
+  it("does not add mount flags when no mounts configured", () => {
+    // The default mounts are the project and config dirs.
+    // There should be exactly 2 volume mounts, no more.
+    const config = makeFullConfig();
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const volumeArgs = args.filter((_, i) => args[i - 1] === "-v");
+    expect(volumeArgs).toHaveLength(2);
+  });
+
+  it("adds multiple custom mounts", () => {
+    const config = makeFullConfig({
+      mounts: [
+        { host: "/host/a", container: "/container/a" },
+        { host: "/host/b", container: "/container/b", mode: "ro" },
+      ],
+    });
+    const args = buildDockerRunArgs(config, ["pi"]);
+
+    const volumeArgs = args.filter((_, i) => args[i - 1] === "-v");
+    // 2 default mounts + 2 custom = 4
+    expect(volumeArgs).toHaveLength(4);
+    expect(volumeArgs).toContain("/host/a:/container/a");
+    expect(volumeArgs).toContain("/host/b:/container/b:ro");
+  });
+
+  it("does not mount docker socket when mounts list does not include it", () => {
+    const config = makeFullConfig();
     const args = buildDockerRunArgs(config, ["pi"]);
 
     const volumeArgs = args.filter((_, i) => args[i - 1] === "-v");
@@ -260,7 +286,7 @@ describe("buildDockerRunArgs", () => {
     expect(hasGitEnv).toBe(false);
   });
 
-  it("does not mount docker socket when privileged is default (false)", () => {
+  it("does not add custom mounts when none configured", () => {
     const config = makeFullConfig();
     const args = buildDockerRunArgs(config, ["pi"]);
 

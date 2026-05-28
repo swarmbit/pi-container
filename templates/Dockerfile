@@ -30,7 +30,7 @@ ENV EDITOR=nvim
 ENV VISUAL=nvim
 
 # Install runtime dependencies (docker.io included so the CLI is always
-# available; the socket is mounted at runtime only with --privileged)
+# available; mount the docker socket via the mounts config if needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     git \
     curl \

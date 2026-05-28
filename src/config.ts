@@ -1,14 +1,14 @@
 // ============================================================
 // pi-container — Config discovery and loading
 // ============================================================
-// Configurable settings: ports and env.
+// Configurable settings: ports, env, and mounts.
 // Pi version and image are baked into this npm package.
 //
 // Config precedence (highest wins):
 //   1. CLI flags              (-p, --port)
 //   2. User config            (~/.pi/pi-container.yml)
 //   3. Project config           (.pi/pi-container.yml)
-//   4. (none — no built-in defaults for ports/env)
+//   4. (none — no built-in defaults for ports/env/mounts)
 //
 // Config file schema:
 //   ports:
@@ -16,10 +16,11 @@
 //     - 8080:80
 //   env:
 //     ANTHROPIC_API_KEY: sk-xxx
+//   mounts:
+//     - /var/run/docker.sock:/var/run/docker.sock
+//     - ~/.ssh:/home/pi-user/.ssh:ro
 //   gitUserName: John Doe
 //   gitUserEmail: john@example.com
-//   privileged: true  # mount docker socket + install Docker CLI
-//   dockerSocket: /var/run/docker.sock  # custom socket path
 // ============================================================
 
 import * as path from "path";
@@ -53,9 +54,6 @@ export const PI_VERSION = "0.76.0";
 /** Docker image tag derived from the pi version. */
 export const PI_IMAGE = `pi-agent:${PI_VERSION}`;
 
-/** Default host path to the Docker socket. */
-export const DEFAULT_DOCKER_SOCKET = "/var/run/docker.sock";
-
 // ── Types ──────────────────────────────────────────────────────
 
 export interface PortMapping {
@@ -65,15 +63,21 @@ export interface PortMapping {
   container: number;
 }
 
+export interface MountMapping {
+  /** Host path */
+  host: string;
+  /** Container path */
+  container: string;
+  /** Mount mode (e.g. "ro", "rw", "cached"). Default: no mode (read-write). */
+  mode?: string;
+}
+
 /** User-configurable settings (from pi-container.yml). */
 export interface PiContainerConfig {
   ports: PortMapping[];
   env: Record<string, string>;
+  mounts: MountMapping[];
   dockerfileExtension?: string;
-  /** Mount docker socket into the container and install Docker CLI in the image. */
-  privileged: boolean;
-  /** Host path to the Docker socket (default: /var/run/docker.sock). */
-  dockerSocket: string;
   /** Git user name for commits made inside the container. */
   gitUserName?: string;
   /** Git user email for commits made inside the container. */
@@ -94,10 +98,6 @@ export interface LoadConfigOptions {
   homeDir?: string;
   /** Port mappings from CLI -p flags (highest precedence). */
   cliPorts?: string[];
-  /** Privileged mode from CLI (highest precedence). */
-  cliPrivileged?: boolean;
-  /** Docker socket path from CLI (highest precedence). */
-  cliDockerSocket?: string;
   /** Enable debug logging. */
   debug?: boolean;
 }
@@ -107,9 +107,8 @@ export interface LoadConfigOptions {
 interface ConfigFile {
   ports?: (number | string)[];
   env?: Record<string, string>;
+  mounts?: string[];
   dockerfileExtension?: string;
-  privileged?: boolean;
-  dockerSocket?: string;
   gitUserName?: string;
   gitUserEmail?: string;
 }
@@ -157,19 +156,11 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig & Run
   const dockerfileExtension =
     (projectConfig.dockerfileExtension ?? userConfig.dockerfileExtension)?.trimEnd();
 
-  // Privileged mode: CLI > project config > user config
-  const privileged: boolean =
-    options?.cliPrivileged ??
-    projectConfig.privileged ??
-    userConfig.privileged ??
-    false;
-
-  // Docker socket path: CLI > project config > user config > default
-  const dockerSocket: string =
-    options?.cliDockerSocket ??
-    projectConfig.dockerSocket ??
-    userConfig.dockerSocket ??
-    DEFAULT_DOCKER_SOCKET;
+  // Mounts: merge project + user (user can add to project mounts, not replace)
+  const projectMounts: MountMapping[] = parseConfigMounts(projectConfig.mounts);
+  const userMounts: MountMapping[] = parseConfigMounts(userConfig.mounts);
+  // Merge with later mounts overriding earlier ones on matching container paths
+  const mounts = mergeMounts(projectMounts, userMounts);
 
   // Git user name: project config > user config > host git config
   const gitUserName: string | undefined =
@@ -186,9 +177,8 @@ export function loadConfig(options?: LoadConfigOptions): PiContainerConfig & Run
   return {
     ports,
     env,
+    mounts,
     dockerfileExtension,
-    privileged,
-    dockerSocket,
     gitUserName,
     gitUserEmail,
     configDir,
@@ -356,6 +346,55 @@ function mergePorts(...lists: PortMapping[][]): PortMapping[] {
     }
   }
   return Array.from(seen.values()).sort((a, b) => a.host - b.host);
+}
+
+/** Parse mount entries from config file (each is a string like /host:/container or /host:/container:ro). */
+function parseConfigMounts(mounts: string[] | undefined): MountMapping[] {
+  if (!mounts) return [];
+  const mappings: MountMapping[] = [];
+  for (const entry of mounts) {
+    mappings.push(parseMountMapping(entry));
+  }
+  return mappings;
+}
+
+/** Parse a single mount string like "/host:/container" or "/host:/container:ro". */
+export function parseMountMapping(input: string): MountMapping {
+  const trimmed = input.trim();
+  const parts = trimmed.split(":");
+
+  if (parts.length === 2) {
+    // /host:/container
+    const [host, container] = parts;
+    if (!host || !container) {
+      throw new Error(`Invalid mount mapping: "${input}". Expected HOST:CONTAINER format.`);
+    }
+    return { host, container };
+  }
+
+  if (parts.length === 3) {
+    // /host:/container:mode
+    const [host, container, mode] = parts;
+    if (!host || !container || !mode) {
+      throw new Error(`Invalid mount mapping: "${input}". Expected HOST:CONTAINER:MODE format.`);
+    }
+    return { host, container, mode };
+  }
+
+  throw new Error(`Invalid mount mapping: "${input}". Expected HOST:CONTAINER or HOST:CONTAINER:MODE format.`);
+}
+
+/** Merge mount lists. Later entries override earlier ones on matching container paths. */
+function mergeMounts(project: MountMapping[], user: MountMapping[]): MountMapping[] {
+  // Use Map keyed by container path for dedup; user mounts win over project
+  const seen = new Map<string, MountMapping>();
+  for (const m of project) {
+    seen.set(m.container, m);
+  }
+  for (const m of user) {
+    seen.set(m.container, m);
+  }
+  return Array.from(seen.values());
 }
 
 /** Check if a port is available on localhost. Returns true if available. */
