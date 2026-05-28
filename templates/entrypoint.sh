@@ -18,12 +18,6 @@ if [ "$(id -u pi-user)" != "${HOST_UID}" ]; then
   usermod -u "${HOST_UID}" -g "${HOST_GID}" pi-user 2>/dev/null || true
 fi
 
-# ── Fix ownership of config directory ──────────────────
-# Skip chown on the mounted volume: pi-user's UID/GID already
-# match the host (set above), so mounted files are accessible.
-# Recursive chown on virtualized mounts can hang indefinitely.
-# Only chown files we create ourselves below.
-
 # ── Copy default settings if none exist ────────────────
 PI_SETTINGS="${PI_AGENT_HOME}/settings.json"
 DEFAULT_SETTINGS="/opt/pi/default-settings.json"
@@ -33,10 +27,6 @@ if [ ! -f "${PI_SETTINGS}" ]; then
   chown pi-user:pi-user "${PI_SETTINGS}" 2>/dev/null || true
 fi
 
-# ── Install team package ───────────────────────────────
-# The default pi-container package (extensions, themes, etc.)
-# is baked into the image at /opt/pi-package. Install it so
-# pi discovers its resources and registers the theme.
 gosu pi-user pi install /opt/pi-package
 
 # ── Set git user info from host ────────────────────────
