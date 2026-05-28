@@ -294,6 +294,12 @@ export function buildDockerRunArgs(config: PiContainerConfig & RuntimeContext, c
   args.push("-e", `HOST_GID=${gid}`);
   debugLog(`Host UID=${uid}, GID=${gid}`);
 
+  // Pass host home directory so extensions can resolve host paths
+  // (e.g., for worktree paths that live under ~/.pi which is volume-mounted)
+  const hostHome = os.homedir();
+  args.push("-e", `PI_HOST_HOME=${hostHome}`);
+  debugLog(`Host HOME=${hostHome}`);
+
   // Custom volume mounts from config
   if (config.mounts.length > 0) {
     debugLog(`Custom mounts: ${config.mounts.map(m => `${m.host}:${m.container}${m.mode ? ":" + m.mode : ""}`).join(", ")}`);

@@ -88,16 +88,19 @@ describe("buildDockerRunArgs", () => {
     expect(args[wIdx + 1]).toBe("/my-app");
   });
 
-  it("passes HOST_UID, HOST_GID, and WORKSPACE_DIR env vars", () => {
+  it("passes HOST_UID, HOST_GID, WORKSPACE_DIR, and PI_HOST_HOME env vars", () => {
     const config = makeFullConfig();
     const args = buildDockerRunArgs(config, ["pi"]);
 
     const uidEntry = args.find((a) => a.startsWith("HOST_UID="));
     const gidEntry = args.find((a) => a.startsWith("HOST_GID="));
     const workspaceEntry = args.find((a) => a.startsWith("WORKSPACE_DIR="));
+    const hostHomeEntry = args.find((a) => a.startsWith("PI_HOST_HOME="));
     expect(uidEntry).toBeDefined();
     expect(gidEntry).toBeDefined();
     expect(workspaceEntry).toBe("WORKSPACE_DIR=/project");
+    expect(hostHomeEntry).toBeDefined();
+    expect(hostHomeEntry).toBe(`PI_HOST_HOME=${os.homedir()}`);
   });
 
   it("passes env vars from config as -e flags", () => {

@@ -57,6 +57,31 @@ export function setWorktreeLogToFile(enabled: boolean): void {
   _logToFile = enabled;
 }
 
+// ── Host path resolution ───────────────────────────────────
+
+/**
+ * Convert a container path to the corresponding host path.
+ *
+ * Inside the container, ~/.pi is volume-mounted from the host's ~/.pi
+ * (or wherever the host config dir is). PI_HOST_HOME is set by pi-container
+ * at container startup and points to the host user's home directory.
+ *
+ * Returns undefined if PI_HOST_HOME is not set (e.g. running outside a container).
+ */
+function containerToHostPath(containerPath: string): string | undefined {
+  const hostHome = process.env.PI_HOST_HOME;
+  if (!hostHome) return undefined;
+
+  const containerHome = os.homedir(); // /home/pi-user
+  if (containerPath.startsWith(containerHome + path.sep)) {
+    return path.join(hostHome, containerPath.slice(containerHome.length));
+  }
+
+  // If the path doesn't start with the container home, return as-is
+  // (shouldn't happen for worktree paths, but be safe)
+  return containerPath;
+}
+
 // ── Path helpers ────────────────────────────────────────────
 
 /** Top-level worktrees directory in the user's home. */
@@ -698,6 +723,29 @@ export default function (pi: ExtensionAPI) {
 
       const originalCwd = worktreeEntry.originalCwd;
       await createNewSession(ctx, originalCwd)
+    },
+  });
+
+  pi.registerCommand("worktree:host-path", {
+    description: "Print the host path to the current worktree (for opening in a host IDE)",
+    handler: async (_args, ctx) => {
+      const currentCwd = ctx.sessionManager.getCwd();
+
+      if (!isInsideWorktree(currentCwd)) {
+        ctx.ui.notify("Not inside a worktree. Use /worktree:open first.", "error");
+        return;
+      }
+
+      const hostPath = containerToHostPath(currentCwd);
+      if (!hostPath) {
+        ctx.ui.notify(
+          "PI_HOST_HOME is not set. Are you running outside a pi container?",
+          "error"
+        );
+        return;
+      }
+
+      ctx.ui.notify(`Host path: ${hostPath}`, "info");
     },
   });
 }
